@@ -13,7 +13,7 @@
 #   include <cxxabi.h>  // abi::__cxa_demangle
 #endif/*__GNUC__*/
 
-#include "../stopwatch.hpp"
+#include "stopwatch.hpp"
 
 constexpr std::uint64_t calc(int n) {
     std::uint64_t r = n;
