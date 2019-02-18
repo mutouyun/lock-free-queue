@@ -1,22 +1,46 @@
 #include <iostream>
 #include <thread>
 #include <vector>
+#include <typeinfo>
+#include <string>
 #include <cstdint>
 
 #include "queue_locked.h"
 #include "queue_s2s.h"
+
+#if defined(__GNUC__)
+#   include <memory>
+#   include <cxxabi.h>  // abi::__cxa_demangle
+#endif/*__GNUC__*/
+
+#include "../stopwatch.hpp"
 
 constexpr std::uint64_t calc(int n) {
     std::uint64_t r = n;
     return (r * (r - 1)) / 2;
 }
 
-int main() {
-    s2s::queue<int> que;
+template <typename T>
+std::string type_name() {
+#if defined(__GNUC__)
+    const char* typeid_name = typeid(T).name();
+    const char* real_name = abi::__cxa_demangle(typeid_name, nullptr, nullptr, nullptr);
+    std::unique_ptr<void, decltype(::free)*> guard { (void*)real_name, ::free };
+    if (real_name == nullptr) real_name = typeid_name;
+    return real_name;
+#else
+    return typeid(T).name();
+#endif/*__GNUC__*/
+}
+
+template <template <typename> class Queue>
+void benchmark(int loop = 100000) {
+    Queue<int> que;
+    capo::stopwatch<> sw { true };
 
     for (int n = 1; n <= 50; ++n) {
-        std::thread {[&que] {
-            for (int i = 0; i < 100000; ++i) {
+        std::thread {[loop, &que] {
+            for (int i = 0; i < loop; ++i) {
                 que.push(i);
             }
             que.push(-1);
@@ -31,14 +55,17 @@ int main() {
             }
         }}.join();
 
-        if (calc(100000) == sum) {
-            std::cout << n << ": pass..." << std::endl;
-        }
-        else {
+        if (calc(loop) != sum) {
             std::cout << n << ": fail... " << sum << std::endl;
         }
     }
 
-    std::cout << "done!" << std::endl;
+    auto t = sw.elapsed<std::chrono::milliseconds>();
+    std::cout << "done! " << t << "ms\t- " << type_name<decltype(que)>() << std::endl;
+}
+
+int main() {
+    benchmark<locked::queue>();
+    benchmark<s2s::queue>();
     return 0;
 }

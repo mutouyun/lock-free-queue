@@ -7,7 +7,7 @@ namespace unsafe {
 template <typename T>
 class pool {
 
-    struct node {
+    union node {
         T     data_;
         node* next_;
     } * cursor_ = nullptr;
@@ -28,9 +28,9 @@ public:
     template <typename... P>
     T* alloc(P&&... pars) {
         if (cursor_ == nullptr) {
-            return reinterpret_cast<T*>(new node { { std::forward<P>(pars)... }, nullptr });
+            return &((new node { std::forward<P>(pars)... })->data_);
         }
-        void* p = cursor_;
+        void* p = &(cursor_->data_);
         cursor_ = cursor_->next_;
         return ::new (p) T { std::forward<P>(pars)... };
     }
