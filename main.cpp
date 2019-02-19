@@ -7,6 +7,7 @@
 
 #include "queue_locked.h"
 #include "queue_s2s.h"
+#include "queue_m2m.h"
 
 #if defined(__GNUC__)
 #   include <memory>
@@ -49,9 +50,12 @@ void benchmark(int loop = 100000) {
         std::uint64_t sum = 0;
         std::thread {[&que, &sum] {
             decltype(que.pop()) tp;
-            while (1) if (std::get<1>(tp = que.pop())) {
-                if (std::get<0>(tp) < 0) return;
-                sum += std::get<0>(tp);
+            while (1) {
+                while (std::get<1>(tp = que.pop())) {
+                    if (std::get<0>(tp) < 0) return;
+                    sum += std::get<0>(tp);
+                }
+                std::this_thread::yield();
             }
         }}.join();
 
@@ -67,5 +71,6 @@ void benchmark(int loop = 100000) {
 int main() {
     benchmark<locked::queue>();
     benchmark<s2s::queue>();
+    benchmark<m2m::queue>();
     return 0;
 }

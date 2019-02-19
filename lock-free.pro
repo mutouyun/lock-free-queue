@@ -13,5 +13,6 @@ SOURCES += \
 
 HEADERS += \
     include/queue_unsafe.h \
+    include/queue_locked.h \
     include/queue_s2s.h \
-    include/queue_locked.h
+    include/queue_m2m.h
