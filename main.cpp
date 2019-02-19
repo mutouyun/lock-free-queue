@@ -39,7 +39,7 @@ void benchmark(int loop = 100000) {
     Queue<int> que;
     capo::stopwatch<> sw { true };
 
-    for (int n = 1; n <= 50; ++n) {
+    for (int n = 1; n <= 100; ++n) {
         std::thread {[loop, &que] {
             for (int i = 0; i < loop; ++i) {
                 que.push(i);
@@ -70,7 +70,7 @@ void benchmark(int loop = 100000) {
 
 int main() {
     benchmark<locked::queue>();
-    benchmark<s2s::queue>();
     benchmark<m2m::queue>();
+    benchmark<s2s::queue>();
     return 0;
 }
