@@ -1,10 +1,121 @@
+/*
+ * https://coolshell.cn/articles/8239.html
+ * http://www.voidcn.com/article/p-sijuqlbv-zs.html
+ * http://blog.jobbole.com/107955/
+*/
+
 #pragma once
 
 #include <atomic>
 #include <new>
 #include <utility>
+#include <cstdint>
 
 namespace m2m {
+
+namespace detail {
+
+template <std::size_t Bytes>
+struct tagged_factor;
+
+template <>
+struct tagged_factor<4> {
+    enum : std::uint64_t {
+        mask = 0x00000000ffffffffUL,
+        plus = 0x0000000100000000UL
+    };
+};
+
+template <>
+struct tagged_factor<8> {
+    enum : std::uint64_t {
+        mask = 0x0000ffffffffffffUL,
+        plus = 0x0001000000000000UL
+    };
+};
+
+template <typename T, std::size_t Bytes = sizeof(T*)>
+class tagged_ptr {
+
+    enum : std::uint64_t {
+        mask = tagged_factor<Bytes>::mask,
+        plus = tagged_factor<Bytes>::plus
+    };
+
+    std::uint64_t data_ { 0 };
+
+public:
+    tagged_ptr() = default;
+    tagged_ptr(tagged_ptr const &) = default;
+
+    tagged_ptr(T* ptr)
+        : data_(reinterpret_cast<std::uint64_t>(ptr))
+    {}
+
+    tagged_ptr(std::uint64_t ptr)
+        : data_(ptr)
+    {}
+
+    tagged_ptr& operator=(tagged_ptr const &) = default;
+
+    std::uint64_t data() const {
+        return data_;
+    }
+
+    operator T*() const {
+        return reinterpret_cast<T*>(data_ & mask);
+    }
+
+    T* operator->() const { return  static_cast<T*>(*this); }
+    T& operator* () const { return *static_cast<T*>(*this); }
+
+    template <typename Atomic>
+    static tagged_ptr acquire_unique(Atomic& ptr) {
+        return { reinterpret_cast<T*>(ptr.fetch_add(plus) + plus) };
+    }
+};
+
+} // namespace detail
+
+template <typename T>
+class tagged_ptr {
+
+    std::atomic<std::uint64_t> data_ { 0 };
+
+public:
+    tagged_ptr() = default;
+    tagged_ptr(tagged_ptr const &) = default;
+
+    tagged_ptr(T* ptr)
+        : data_(reinterpret_cast<std::uint64_t>(ptr))
+    {}
+
+    tagged_ptr& operator=(tagged_ptr const &) = default;
+
+    operator T*() const {
+        return detail::tagged_ptr<T>{ data_.load() };
+    }
+
+    T* operator->() const { return  static_cast<T*>(*this); }
+    T& operator* () const { return *static_cast<T*>(*this); }
+
+    auto acquire_unique() {
+        return detail::tagged_ptr<T>::acquire_unique(data_);
+    }
+
+    auto load() {
+        return acquire_unique();
+    }
+
+    bool compare_exchange_weak(detail::tagged_ptr<T>& exp, T* val) {
+        auto num = exp.data();
+        if (data_.compare_exchange_weak(num, reinterpret_cast<std::uint64_t>(val))) {
+            return true;
+        }
+        exp = acquire_unique();
+        return false;
+    }
+};
 
 template <typename T>
 class pool {
@@ -14,7 +125,7 @@ class pool {
         node* next_;
     };
 
-    std::atomic<node*> cursor_ { nullptr };
+    tagged_ptr<node> cursor_ { nullptr };
 
 public:
     ~pool() {
@@ -32,7 +143,7 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
-        node* curr = cursor_.load();
+        auto curr = cursor_.load();
         while (1) {
             if (curr == nullptr) {
                 return &((new node { std::forward<P>(pars)... })->data_);
@@ -47,7 +158,7 @@ public:
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        node* curr = cursor_.load();
+        auto curr = cursor_.load();
         while (1) {
             temp->next_ = curr;
             if (cursor_.compare_exchange_weak(curr, temp)) {
@@ -65,7 +176,7 @@ class queue {
         std::atomic<node*> next_;
     } dummy_ { {}, nullptr };
 
-    std::atomic<node*> head_ { &dummy_ };
+    tagged_ptr <node > head_ { &dummy_ };
     std::atomic<node*> tail_ { nullptr };
 
     pool<node> allocator_;
@@ -77,27 +188,12 @@ public:
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        auto curr = tail_.load();
+        auto curr = tail_.exchange(n);
         if (curr == nullptr) {
-            tail_.store(n);
             head_.load()->next_.store(n);
             return;
         }
-        auto next = curr->next_.load();
-        while (1) {
-            if (next == nullptr) {
-                if (curr->next_.compare_exchange_weak(next, n)) {
-                    break;
-                }
-                curr = tail_.load();
-                next = curr->next_.load();
-            }
-            else {
-                curr = next;
-                next = curr->next_.load();
-            }
-        }
-        tail_.compare_exchange_strong(curr, n);
+        curr->next_.store(n);
     }
 
     std::tuple<T, bool> pop() {
