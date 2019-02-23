@@ -9,10 +9,10 @@
 #include <atomic>
 #include <new>
 #include <utility>
+#include <tuple>
 #include <cstdint>
 
 namespace m2m {
-
 namespace detail {
 
 template <std::size_t Bytes>
@@ -21,98 +21,91 @@ struct tagged_factor;
 template <>
 struct tagged_factor<4> {
     enum : std::uint64_t {
-        mask = 0x00000000ffffffffUL,
-        plus = 0x0000000100000000UL
+        mask = 0x00000000fffffffful,
+        incr = 0x0000000100000000ul
     };
 };
 
 template <>
 struct tagged_factor<8> {
     enum : std::uint64_t {
-        mask = 0x0000ffffffffffffUL,
-        plus = 0x0001000000000000UL
+        mask = 0x0000fffffffffffful,
+        incr = 0x0001000000000000ul
     };
 };
 
-template <typename T, std::size_t Bytes = sizeof(T*)>
-class tagged_ptr {
+template <typename T, std::size_t Bytes = sizeof(T)>
+class tagged {
 
     enum : std::uint64_t {
         mask = tagged_factor<Bytes>::mask,
-        plus = tagged_factor<Bytes>::plus
+        incr = tagged_factor<Bytes>::incr
     };
 
     std::uint64_t data_ { 0 };
 
 public:
-    tagged_ptr() = default;
-    tagged_ptr(tagged_ptr const &) = default;
+    tagged() = default;
+    tagged(tagged const &) = default;
 
-    tagged_ptr(T* ptr)
+    tagged(T ptr)
         : data_(reinterpret_cast<std::uint64_t>(ptr))
     {}
 
-    tagged_ptr(std::uint64_t ptr)
-        : data_(ptr)
+    tagged(T ptr, std::uint64_t tag)
+        : data_(reinterpret_cast<std::uint64_t>(ptr) | ((tag + incr) & ~mask))
     {}
 
-    tagged_ptr& operator=(tagged_ptr const &) = default;
+    tagged(std::uint64_t num)
+        : data_(num)
+    {}
+
+    tagged& operator=(tagged const &) = default;
 
     std::uint64_t data() const {
         return data_;
     }
 
-    operator T*() const {
-        return reinterpret_cast<T*>(data_ & mask);
+    operator T() const {
+        return reinterpret_cast<T>(data_ & mask);
     }
 
-    T* operator->() const { return  static_cast<T*>(*this); }
-    T& operator* () const { return *static_cast<T*>(*this); }
-
-    template <typename Atomic>
-    static tagged_ptr acquire_unique(Atomic& ptr) {
-        return { reinterpret_cast<T*>(ptr.fetch_add(plus) + plus) };
-    }
+    T    operator->() const { return  static_cast<T>(*this); }
+    auto operator* () const { return *static_cast<T>(*this); }
 };
 
 } // namespace detail
 
 template <typename T>
-class tagged_ptr {
+class tagged {
 
     std::atomic<std::uint64_t> data_ { 0 };
 
 public:
-    tagged_ptr() = default;
-    tagged_ptr(tagged_ptr const &) = default;
+    tagged() = default;
+    tagged(tagged const &) = default;
 
-    tagged_ptr(T* ptr)
+    tagged(T ptr)
         : data_(reinterpret_cast<std::uint64_t>(ptr))
     {}
 
-    tagged_ptr& operator=(tagged_ptr const &) = default;
+    tagged& operator=(tagged const &) = default;
 
-    operator T*() const {
-        return detail::tagged_ptr<T>{ data_.load() };
-    }
+    operator T() const { return load(); }
 
-    T* operator->() const { return  static_cast<T*>(*this); }
-    T& operator* () const { return *static_cast<T*>(*this); }
-
-    auto acquire_unique() {
-        return detail::tagged_ptr<T>::acquire_unique(data_);
-    }
+    T    operator->() const { return  static_cast<T>(*this); }
+    auto operator* () const { return *static_cast<T>(*this); }
 
     auto load() {
-        return acquire_unique();
+        return detail::tagged<T>{ data_.load() };
     }
 
-    bool compare_exchange_weak(detail::tagged_ptr<T>& exp, T* val) {
+    bool compare_exchange_weak(detail::tagged<T>& exp, T val) {
         auto num = exp.data();
-        if (data_.compare_exchange_weak(num, reinterpret_cast<std::uint64_t>(val))) {
+        if (data_.compare_exchange_weak(num, detail::tagged<T>{ val, num }.data())) {
             return true;
         }
-        exp = acquire_unique();
+        exp = num;
         return false;
     }
 };
@@ -125,7 +118,7 @@ class pool {
         node* next_;
     };
 
-    tagged_ptr<node> cursor_ { nullptr };
+    tagged<node*> cursor_ { nullptr };
 
 public:
     ~pool() {
@@ -173,10 +166,23 @@ class queue {
 
     struct node {
         T data_;
-        std::atomic<node*> next_;
-    } dummy_ { {}, nullptr };
+        std::atomic<unsigned> counter_;
+        std::atomic<node*>    next_;
 
-    tagged_ptr <node > head_ { &dummy_ };
+        template <typename A>
+        static node* alloc(A& alc, T const & val) {
+            return alc.alloc(val, 0u, nullptr);
+        }
+
+        template <typename A>
+        void free(A& alc) {
+//            if (counter_.fetch_sub(1) == 1) {
+                alc.free(this);
+//            }
+        }
+    } dummy_ { {}, 0u, nullptr };
+
+    tagged     <node*> head_ { &dummy_ };
     std::atomic<node*> tail_ { nullptr };
 
     pool<node> allocator_;
@@ -187,7 +193,7 @@ public:
     }
 
     void push(T const & val) {
-        auto n = allocator_.alloc(val, nullptr);
+        auto n = node::alloc(allocator_, val);
         auto curr = tail_.exchange(n);
         if (curr == nullptr) {
             head_.load()->next_.store(n);
@@ -205,7 +211,7 @@ public:
             }
             if (head_.compare_exchange_weak(curr, next)) {
                 if (curr != &dummy_) {
-                    allocator_.free(curr);
+                    curr->free(allocator_);
                 }
                 break;
             }
