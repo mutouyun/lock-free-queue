@@ -1,6 +1,8 @@
 #pragma once
 
 #include <tuple>
+#include <condition_variable>
+#include <mutex>
 
 namespace unsafe {
 
@@ -86,3 +88,30 @@ public:
 };
 
 } // namespace unsafe
+
+namespace safe {
+
+template <typename T>
+class queue : unsafe::queue<T> {
+
+    using base_t = unsafe::queue<T>;
+
+    std::mutex              lock_;
+    std::condition_variable cond_;
+
+public:
+    bool empty() const {
+        auto guard = std::unique_lock { &lock_ };
+        return base_t::empty();
+    }
+
+    void push(T const & val) {
+
+    }
+
+    std::tuple<T, bool> pop() {
+
+    }
+};
+
+} // namespace safe

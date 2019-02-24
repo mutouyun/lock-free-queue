@@ -5,6 +5,7 @@
 #include <string>
 #include <cstdint>
 
+#include "queue_unsafe.h"
 #include "queue_locked.h"
 #include "queue_s2s.h"
 #include "queue_m2m.h"
@@ -65,7 +66,6 @@ void benchmark(int loop = 100000) {
                         }
                         else sum[i] += std::get<0>(tp);
                     }
-                    std::this_thread::yield();
                 }
             }};
         }
@@ -86,14 +86,14 @@ void benchmark(int loop = 100000) {
 }
 
 int main() {
-    benchmark<s2s::queue   , 1, 1>();
-    benchmark<m2m::queue   , 1, 1>();
     benchmark<locked::queue, 1, 1>();
+    benchmark<m2m::queue   , 1, 1>();
+    benchmark<s2s::queue   , 1, 1>();
 
-    benchmark<m2m::queue   , 4, 1>();
     benchmark<locked::queue, 4, 1>();
+    benchmark<m2m::queue   , 4, 1>();
 
-//    benchmark<m2m::queue   , 1, 4>();
-//    benchmark<locked::queue, 1, 4>();
+    benchmark<locked::queue, 1, 4>();
+//    benchmark<m2m::queue   , 1, 2>();
     return 0;
 }

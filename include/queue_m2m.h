@@ -161,6 +161,15 @@ public:
     }
 };
 
+template <typename F>
+class scope_exit {
+    F f_;
+
+public:
+    scope_exit(F f) : f_(f) {}
+    ~scope_exit() { f_(); }
+};
+
 template <typename T>
 class queue {
 
@@ -171,14 +180,14 @@ class queue {
 
         template <typename A>
         static node* alloc(A& alc, T const & val) {
-            return alc.alloc(val, 0u, nullptr);
+            return alc.alloc(val, 1u, nullptr);
         }
 
         template <typename A>
-        void free(A& alc) {
-//            if (counter_.fetch_sub(1) == 1) {
+        void free(A& alc, node* dummy) {
+            if (this != dummy && counter_.fetch_sub(1) == 1) {
                 alc.free(this);
-//            }
+            }
         }
     } dummy_ { {}, 0u, nullptr };
 
@@ -186,6 +195,7 @@ class queue {
     std::atomic<node*> tail_ { nullptr };
 
     pool<node> allocator_;
+    mutable std::mutex mtx_;
 
 public:
     bool empty() const {
@@ -205,18 +215,32 @@ public:
     std::tuple<T, bool> pop() {
         auto curr = head_.load();
         node* next;
+        T ret;
+
         while (1) {
             if ((next = curr->next_.load()) == nullptr) {
                 return {};
             }
+
+            auto cnt = next->counter_.load();
+            if (cnt == 0) {
+                curr = head_.load();
+                continue;
+            }
+            if (!next->counter_.compare_exchange_strong(cnt, cnt + 1)) {
+                continue;
+            }
+
+            auto guard_next = scope_exit {[this, next] {
+                next->free(allocator_, &dummy_);
+            }};
             if (head_.compare_exchange_weak(curr, next)) {
-                if (curr != &dummy_) {
-                    curr->free(allocator_);
-                }
+                ret = next->data_;
+                curr->free(allocator_, &dummy_);
                 break;
             }
         }
-        return std::make_tuple(next->data_, true);
+        return std::make_tuple(ret, true);
     }
 };
 
