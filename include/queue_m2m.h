@@ -175,9 +175,9 @@ class queue {
 
     struct node {
         T data_;
-        std::atomic<node*>    next_;
         std::atomic<unsigned> counter_;
-    } dummy_ { {}, nullptr, 0u };
+        std::atomic<node*>    next_;
+    } dummy_ { {}, 0u, nullptr };
 
     tagged     <node*> head_ { &dummy_ };
     std::atomic<node*> tail_ { nullptr };
@@ -213,7 +213,7 @@ public:
     }
 
     void push(T const & val) {
-        auto n = allocator_.alloc(val, nullptr, 1u);
+        auto n = allocator_.alloc(val, 1u, nullptr);
         auto curr = tail_.exchange(n, std::memory_order_acq_rel);
         if (curr == nullptr) {
             head_.load(std::memory_order_acquire)->next_.store(n, std::memory_order_release);

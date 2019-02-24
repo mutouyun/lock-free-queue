@@ -101,7 +101,7 @@ class queue : unsafe::queue<T> {
 
 public:
     bool empty() const {
-        auto guard = std::unique_lock { &lock_ };
+        auto guard = std::unique_lock { lock_ };
         return base_t::empty();
     }
 
