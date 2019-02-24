@@ -96,13 +96,13 @@ public:
     T    operator->() const { return  static_cast<T>(*this); }
     auto operator* () const { return *static_cast<T>(*this); }
 
-    auto load() {
-        return detail::tagged<T>{ data_.load() };
+    auto load(std::memory_order order) {
+        return detail::tagged<T>{ data_.load(order) };
     }
 
-    bool compare_exchange_weak(detail::tagged<T>& exp, T val) {
+    bool compare_exchange_weak(detail::tagged<T>& exp, T val, std::memory_order order) {
         auto num = exp.data();
-        if (data_.compare_exchange_weak(num, detail::tagged<T>{ val, num }.data())) {
+        if (data_.compare_exchange_weak(num, detail::tagged<T>{ val, num }.data(), order)) {
             return true;
         }
         exp = num;
@@ -122,7 +122,7 @@ class pool {
 
 public:
     ~pool() {
-        auto curr = cursor_.load();
+        auto curr = cursor_.load(std::memory_order_acquire);
         while (curr != nullptr) {
             auto temp = curr->next_;
             delete curr;
@@ -136,12 +136,12 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
-        auto curr = cursor_.load();
+        auto curr = cursor_.load(std::memory_order_acquire);
         while (1) {
             if (curr == nullptr) {
                 return &((new node { std::forward<P>(pars)... })->data_);
             }
-            if (cursor_.compare_exchange_weak(curr, curr->next_)) {
+            if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acq_rel)) {
                 break;
             }
         }
@@ -151,10 +151,10 @@ public:
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        auto curr = cursor_.load();
+        auto curr = cursor_.load(std::memory_order_acquire);
         while (1) {
             temp->next_ = curr;
-            if (cursor_.compare_exchange_weak(curr, temp)) {
+            if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_acq_rel)) {
                 break;
             }
         }
@@ -175,68 +175,91 @@ class queue {
 
     struct node {
         T data_;
-        std::atomic<unsigned> counter_;
         std::atomic<node*>    next_;
-
-        template <typename A>
-        static node* alloc(A& alc, T const & val) {
-            return alc.alloc(val, 1u, nullptr);
-        }
-
-        template <typename A>
-        void free(A& alc, node* dummy) {
-            if (this != dummy && counter_.fetch_sub(1) == 1) {
-                alc.free(this);
-            }
-        }
-    } dummy_ { {}, 0u, nullptr };
+        std::atomic<unsigned> counter_;
+    } dummy_ { {}, nullptr, 0u };
 
     tagged     <node*> head_ { &dummy_ };
     std::atomic<node*> tail_ { nullptr };
 
     pool<node> allocator_;
-    mutable std::mutex mtx_;
+
+    enum {
+        ref_invalid,
+        ref_succ,
+        ref_fail
+    };
+
+    int add_ref(node* item) {
+        if (item == &dummy_) return ref_succ;
+        auto cnt = item->counter_.load(std::memory_order_acquire);
+        if (cnt == 0) {
+            return ref_invalid;
+        }
+        return item->counter_.compare_exchange_weak(cnt, cnt + 1, std::memory_order_release) ?
+                    ref_succ : ref_fail;
+    }
+
+    void del_ref(node* item) {
+        if (item == &dummy_) return;
+        if (item->counter_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+            allocator_.free(item);
+        }
+    }
 
 public:
     bool empty() const {
-        return head_.load()->next_ == nullptr;
+        return head_.load(std::memory_order_acquire)->next_ == nullptr;
     }
 
     void push(T const & val) {
-        auto n = node::alloc(allocator_, val);
-        auto curr = tail_.exchange(n);
+        auto n = allocator_.alloc(val, nullptr, 1u);
+        auto curr = tail_.exchange(n, std::memory_order_acq_rel);
         if (curr == nullptr) {
-            head_.load()->next_.store(n);
+            head_.load(std::memory_order_acquire)->next_.store(n, std::memory_order_release);
             return;
         }
-        curr->next_.store(n);
+        curr->next_.store(n, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
-        auto curr = head_.load();
-        node* next;
         T ret;
-
+        auto curr = head_.load(std::memory_order_acquire);
         while (1) {
-            if ((next = curr->next_.load()) == nullptr) {
+        next_loop:
+            while (1) {
+                switch (add_ref(curr)) {
+                case ref_succ:
+                    break;
+                case ref_invalid:
+                    curr = head_.load(std::memory_order_acquire);
+                default:
+                    continue;
+                }
+                break;
+            }
+
+            node* next = curr->next_.load(std::memory_order_acquire);
+            if (next == nullptr) {
                 return {};
             }
 
-            auto cnt = next->counter_.load();
-            if (cnt == 0) {
-                curr = head_.load();
-                continue;
-            }
-            if (!next->counter_.compare_exchange_strong(cnt, cnt + 1)) {
-                continue;
+            while (add_ref(next) != ref_succ) {
+                auto temp = head_.load(std::memory_order_acquire);
+                if (curr == temp) continue;
+                del_ref(curr);
+                curr = temp;
+                goto next_loop;
             }
 
             auto guard_next = scope_exit {[this, next] {
-                next->free(allocator_, &dummy_);
+                del_ref(next);
             }};
-            if (head_.compare_exchange_weak(curr, next)) {
+            auto guard_curr = scope_exit {[this, curr] {
+                del_ref(curr);
+            }};
+            if (head_.compare_exchange_weak(curr, next, std::memory_order_acq_rel)) {
                 ret = next->data_;
-                curr->free(allocator_, &dummy_);
                 break;
             }
         }

@@ -41,43 +41,44 @@ void benchmark(int loop = 100000) {
     capo::stopwatch<> sw { true };
     int cnt = (loop / PushN);
 
-    for (int n = 1; n <= 100; ++n) {
-        std::thread push_trds[PushN];
-        for (int i = 0; i < PushN; ++i) {
-            (push_trds[i] = std::thread {[i, cnt, &que] {
+    std::thread push_trds[PushN];
+    for (int i = 0; i < PushN; ++i) {
+        (push_trds[i] = std::thread {[i, cnt, &que] {
+            for (int k = 0; k < 100; ++k) {
                 int beg = i * cnt;
                 for (int n = beg; n < (beg + cnt); ++n) {
                     que.push(n);
                 }
-                que.push(-1);
-            }}).detach();
-        }
+            }
+            que.push(-1);
+        }}).detach();
+    }
 
-        std::uint64_t sum[PopN] {};
-        std::atomic<int> push_end { 0 };
-        std::thread pop_trds[PopN];
-        for (int i = 0; i < PopN; ++i) {
-            pop_trds[i] = std::thread {[i, &que, &sum, &push_end] {
-                decltype(que.pop()) tp;
-                while (push_end < PushN) {
-                    while (std::get<1>(tp = que.pop())) {
-                        if (std::get<0>(tp) < 0) {
-                            if (++ push_end == PushN) return;
-                        }
-                        else sum[i] += std::get<0>(tp);
+    std::uint64_t sum[PopN] {};
+    std::atomic<int> push_end { 0 };
+    std::thread pop_trds[PopN];
+    for (int i = 0; i < PopN; ++i) {
+        pop_trds[i] = std::thread {[i, &que, &sum, &push_end] {
+            decltype(que.pop()) tp;
+            while (push_end.load(std::memory_order_acquire) < PushN) {
+                while (std::get<1>(tp = que.pop())) {
+                    if (std::get<0>(tp) < 0) {
+                        if ((push_end.fetch_add(1, std::memory_order_release) + 1) == PushN) return;
                     }
+                    else sum[i] += std::get<0>(tp);
                 }
-            }};
-        }
+                std::this_thread::yield();
+            }
+        }};
+    }
 
-        std::uint64_t ret = 0;
-        for (int i = 0; i < PopN; ++i) {
-            pop_trds[i].join();
-            ret += sum[i];
-        }
-        if (calc(loop) != ret) {
-            std::cout << n << ": fail... " << ret << std::endl;
-        }
+    std::uint64_t ret = 0;
+    for (int i = 0; i < PopN; ++i) {
+        pop_trds[i].join();
+        ret += sum[i];
+    }
+    if ((calc(loop) * 100) != ret) {
+        std::cout << "fail... " << ret << std::endl;
     }
 
     auto t = sw.elapsed<std::chrono::milliseconds>();
@@ -94,6 +95,9 @@ int main() {
     benchmark<m2m::queue   , 4, 1>();
 
     benchmark<locked::queue, 1, 4>();
-//    benchmark<m2m::queue   , 1, 2>();
+    benchmark<m2m::queue   , 1, 4>();
+
+    benchmark<locked::queue, 4, 4>();
+    benchmark<m2m::queue   , 4, 4>();
     return 0;
 }

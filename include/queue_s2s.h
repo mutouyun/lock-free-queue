@@ -18,7 +18,7 @@ class pool {
 
 public:
     ~pool() {
-        auto curr = cursor_.load();
+        auto curr = cursor_.load(std::memory_order_acquire);
         while (curr != nullptr) {
             auto temp = curr->next_;
             delete curr;
@@ -32,12 +32,12 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
-        node* curr = cursor_.load();
+        node* curr = cursor_.load(std::memory_order_acquire);
         if (curr == nullptr) {
             return &((new node { std::forward<P>(pars)... })->data_);
         }
         while (1) {
-            if (cursor_.compare_exchange_weak(curr, curr->next_)) {
+            if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acq_rel)) {
                 break;
             }
         }
@@ -47,10 +47,10 @@ public:
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        node* curr = cursor_.load();
+        node* curr = cursor_.load(std::memory_order_acquire);
         while (1) {
             temp->next_ = curr;
-            if (cursor_.compare_exchange_weak(curr, temp)) {
+            if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_acq_rel)) {
                 break;
             }
         }
@@ -72,26 +72,26 @@ class queue {
 
 public:
     bool empty() const {
-        return head_.load()->next_ == nullptr;
+        return head_.load(std::memory_order_acquire)->next_ == nullptr;
     }
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        auto curr = tail_.exchange(n);
+        auto curr = tail_.exchange(n, std::memory_order_acq_rel);
         if (curr == nullptr) {
-            head_.load()->next_.store(n);
+            head_.load()->next_.store(n, std::memory_order_release);
             return;
         }
-        curr->next_.store(n);
+        curr->next_.store(n, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
-        auto curr = head_.load();
-        auto next = curr->next_.load();
+        auto curr = head_.load(std::memory_order_acquire);
+        auto next = curr->next_.load(std::memory_order_acquire);
         if (next == nullptr) {
             return {};
         }
-        head_.store(next);
+        head_.store(next, std::memory_order_release);
         if (curr != &dummy_) {
             allocator_.free(curr);
         }
