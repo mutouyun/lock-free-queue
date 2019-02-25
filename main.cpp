@@ -63,7 +63,10 @@ void benchmark(int loop = 100000) {
             while (push_end.load(std::memory_order_acquire) < PushN) {
                 while (std::get<1>(tp = que.pop())) {
                     if (std::get<0>(tp) < 0) {
-                        if ((push_end.fetch_add(1, std::memory_order_release) + 1) == PushN) return;
+                        if ((push_end.fetch_add(1, std::memory_order_release) + 1) >= PushN) {
+                            que.quit();
+                            return;
+                        }
                     }
                     else sum[i] += std::get<0>(tp);
                 }
@@ -88,16 +91,26 @@ void benchmark(int loop = 100000) {
 
 int main() {
     benchmark<locked::queue, 1, 1>();
+    benchmark<safe::queue  , 1, 1>();
     benchmark<m2m::queue   , 1, 1>();
     benchmark<s2s::queue   , 1, 1>();
 
+    std::cout << std::endl;
+
     benchmark<locked::queue, 4, 1>();
+    benchmark<safe::queue  , 4, 1>();
     benchmark<m2m::queue   , 4, 1>();
 
+    std::cout << std::endl;
+
     benchmark<locked::queue, 1, 4>();
+    benchmark<safe::queue  , 1, 4>();
     benchmark<m2m::queue   , 1, 4>();
 
+    std::cout << std::endl;
+
     benchmark<locked::queue, 4, 4>();
+    benchmark<safe::queue  , 4, 4>();
     benchmark<m2m::queue   , 4, 4>();
     return 0;
 }

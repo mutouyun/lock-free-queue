@@ -27,7 +27,7 @@ public:
     }
 
     bool empty() const {
-        return cursor_ == nullptr;
+        return cursor_.load(std::memory_order_acquire) == nullptr;
     }
 
     template <typename... P>
@@ -66,8 +66,11 @@ class queue {
     pool<node> allocator_;
 
 public:
+    void quit() {}
+
     bool empty() const {
-        return head_.load(std::memory_order_acquire)->next_ == nullptr;
+        return head_.load(std::memory_order_acquire)
+             ->next_.load(std::memory_order_acquire) == nullptr;
     }
 
     void push(T const & val) {

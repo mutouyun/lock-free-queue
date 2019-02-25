@@ -99,18 +99,44 @@ class queue : unsafe::queue<T> {
     std::mutex              lock_;
     std::condition_variable cond_;
 
+    bool quit_ = false;
+
 public:
+    ~queue() {
+        quit();
+    }
+
+    void quit() {
+        {
+            auto guard = std::unique_lock { lock_ };
+            quit_ = true;
+        }
+        cond_.notify_all();
+    }
+
     bool empty() const {
         auto guard = std::unique_lock { lock_ };
         return base_t::empty();
     }
 
     void push(T const & val) {
-
+        {
+            auto guard = std::unique_lock { lock_ };
+            base_t::push(val);
+        }
+        cond_.notify_one();
     }
 
     std::tuple<T, bool> pop() {
-
+        auto guard = std::unique_lock { lock_ };
+        while (!quit_) {
+            auto ret = base_t::pop();
+            if (std::get<1>(ret)) {
+                return ret;
+            }
+            cond_.wait(guard);
+        }
+        return {};
     }
 };
 

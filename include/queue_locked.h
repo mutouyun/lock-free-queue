@@ -63,6 +63,8 @@ class queue {
     mutable std::mutex mtx_;
 
 public:
+    void quit() {}
+
     bool empty() const {
         auto guard = std::unique_lock { mtx_ };
         return head_ == nullptr;
