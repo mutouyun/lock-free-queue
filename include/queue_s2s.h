@@ -47,8 +47,8 @@ public:
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        temp->next_ = cursor_.load(std::memory_order_acquire);
-        while (!cursor_.compare_exchange_weak(temp->next_, temp, std::memory_order_acq_rel)) ;
+        temp->next_ = cursor_.load(std::memory_order_relaxed);
+        while (!cursor_.compare_exchange_weak(temp->next_, temp, std::memory_order_release)) ;
     }
 };
 
@@ -70,18 +70,18 @@ public:
 
     bool empty() const {
         return head_.load(std::memory_order_acquire)
-             ->next_.load(std::memory_order_acquire) == nullptr;
+             ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        tail_.exchange(n, std::memory_order_acq_rel)
+        tail_.exchange(n, std::memory_order_relaxed)
          ->next_.store(n, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
         auto curr = head_.load(std::memory_order_acquire);
-        auto next = curr->next_.load(std::memory_order_acquire);
+        auto next = curr->next_.load(std::memory_order_relaxed);
         if (next == nullptr) {
             return {};
         }

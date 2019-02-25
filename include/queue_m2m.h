@@ -151,10 +151,10 @@ public:
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        auto curr = cursor_.load(std::memory_order_acquire);
+        auto curr = cursor_.load(std::memory_order_relaxed);
         while (1) {
             temp->next_ = curr;
-            if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_acq_rel)) {
+            if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_release)) {
                 break;
             }
         }
@@ -196,10 +196,10 @@ class queue {
             return;
         }
         auto put_free_list = [this](node* first, node* last) {
-            auto list = free_list_.load(std::memory_order_acquire);
+            auto list = free_list_.load(std::memory_order_relaxed);
             while (1) {
-                last->next_ = list;
-                if (free_list_.compare_exchange_weak(list, first, std::memory_order_acq_rel)) {
+                last->next_.store(list, std::memory_order_relaxed);
+                if (free_list_.compare_exchange_weak(list, first, std::memory_order_release)) {
                     break;
                 }
             }
@@ -220,8 +220,12 @@ class queue {
             else if (temp != nullptr) {
                 // fetch the last
                 auto last = temp;
-                while (last->next_ != nullptr) {
-                    last = last->next_;
+                while (1) {
+                    auto next = last->next_.load(std::memory_order_relaxed);
+                    if (next == nullptr) {
+                        break;
+                    }
+                    last = next;
                 }
                 put_free_list(temp, last);
             }
@@ -234,12 +238,12 @@ public:
 
     bool empty() const {
         return head_.load(std::memory_order_acquire)
-             ->next_.load(std::memory_order_acquire) == nullptr;
+             ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        tail_.exchange(n, std::memory_order_acq_rel)
+        tail_.exchange(n, std::memory_order_relaxed)
          ->next_.store(n, std::memory_order_release);
     }
 
@@ -248,7 +252,7 @@ public:
         add_ref();
         auto curr = head_.load(std::memory_order_acquire);
         while (1) {
-            node* next = curr->next_.load(std::memory_order_acquire);
+            node* next = curr->next_.load(std::memory_order_relaxed);
             if (next == nullptr) {
                 del_ref(nullptr);
                 return {};
