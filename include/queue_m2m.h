@@ -175,34 +175,56 @@ class queue {
 
     struct node {
         T data_;
-        std::atomic<unsigned> counter_;
-        std::atomic<node*>    next_;
-    } dummy_ { {}, 0u, nullptr };
+        std::atomic<node*> next_;
+    } dummy_ { {}, nullptr };
 
     tagged     <node*> head_ { &dummy_ };
-    std::atomic<node*> tail_ { nullptr };
+    std::atomic<node*> tail_ { &dummy_ };
 
     pool<node> allocator_;
 
-    enum {
-        ref_invalid,
-        ref_succ,
-        ref_fail
-    };
+    std::atomic<unsigned> counter_   { 0 };
+    std::atomic<node*>    free_list_ { nullptr };
 
-    int add_ref(node* item) {
-        if (item == &dummy_) return ref_succ;
-        auto cnt = item->counter_.load(std::memory_order_acquire);
-        if (cnt == 0) {
-            return ref_invalid;
-        }
-        return item->counter_.compare_exchange_weak(cnt, cnt + 1, std::memory_order_release) ?
-                    ref_succ : ref_fail;
+    void add_ref() {
+        counter_.fetch_add(1, std::memory_order_release);
     }
 
     void del_ref(node* item) {
-        if (item == &dummy_) return;
-        if (item->counter_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        if (item == &dummy_ || item == nullptr) {
+            counter_.fetch_sub(1, std::memory_order_release);
+            return;
+        }
+        auto put_free_list = [this](node* first, node* last) {
+            auto list = free_list_.load(std::memory_order_acquire);
+            while (1) {
+                last->next_ = list;
+                if (free_list_.compare_exchange_weak(list, first, std::memory_order_acq_rel)) {
+                    break;
+                }
+            }
+        };
+        if (counter_.load(std::memory_order_acquire) > 1) {
+            put_free_list(item, item);
+            counter_.fetch_sub(1, std::memory_order_release);
+        }
+        else {
+            auto temp = free_list_.exchange(nullptr, std::memory_order_acq_rel);
+            if (counter_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                while (temp != nullptr) {
+                    auto next = temp->next_.load(std::memory_order_relaxed);
+                    allocator_.free(temp);
+                    temp = next;
+                }
+            }
+            else if (temp != nullptr) {
+                // fetch the last
+                auto last = temp;
+                while (last->next_ != nullptr) {
+                    last = last->next_;
+                }
+                put_free_list(temp, last);
+            }
             allocator_.free(item);
         }
     }
@@ -213,53 +235,24 @@ public:
     }
 
     void push(T const & val) {
-        auto n = allocator_.alloc(val, 1u, nullptr);
-        auto curr = tail_.exchange(n, std::memory_order_acq_rel);
-        if (curr == nullptr) {
-            head_.load(std::memory_order_acquire)->next_.store(n, std::memory_order_release);
-            return;
-        }
-        curr->next_.store(n, std::memory_order_release);
+        auto n = allocator_.alloc(val, nullptr);
+        tail_.exchange(n, std::memory_order_acq_rel)
+         ->next_.store(n, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
         T ret;
+        add_ref();
         auto curr = head_.load(std::memory_order_acquire);
         while (1) {
-        next_loop:
-            while (1) {
-                switch (add_ref(curr)) {
-                case ref_succ:
-                    break;
-                case ref_invalid:
-                    curr = head_.load(std::memory_order_acquire);
-                default:
-                    continue;
-                }
-                break;
-            }
-
             node* next = curr->next_.load(std::memory_order_acquire);
             if (next == nullptr) {
+                del_ref(nullptr);
                 return {};
             }
-
-            while (add_ref(next) != ref_succ) {
-                auto temp = head_.load(std::memory_order_acquire);
-                if (curr == temp) continue;
-                del_ref(curr);
-                curr = temp;
-                goto next_loop;
-            }
-
-            auto guard_next = scope_exit {[this, next] {
-                del_ref(next);
-            }};
-            auto guard_curr = scope_exit {[this, curr] {
-                del_ref(curr);
-            }};
             if (head_.compare_exchange_weak(curr, next, std::memory_order_acq_rel)) {
                 ret = next->data_;
+                del_ref(curr);
                 break;
             }
         }

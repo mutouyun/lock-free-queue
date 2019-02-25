@@ -47,13 +47,8 @@ public:
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        node* curr = cursor_.load(std::memory_order_acquire);
-        while (1) {
-            temp->next_ = curr;
-            if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_acq_rel)) {
-                break;
-            }
-        }
+        temp->next_ = cursor_.load(std::memory_order_acquire);
+        while (!cursor_.compare_exchange_weak(temp->next_, temp, std::memory_order_acq_rel)) ;
     }
 };
 
@@ -66,7 +61,7 @@ class queue {
     } dummy_ { {}, nullptr };
 
     std::atomic<node*> head_ { &dummy_ };
-    std::atomic<node*> tail_ { nullptr };
+    std::atomic<node*> tail_ { &dummy_ };
 
     pool<node> allocator_;
 
@@ -77,12 +72,8 @@ public:
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        auto curr = tail_.exchange(n, std::memory_order_acq_rel);
-        if (curr == nullptr) {
-            head_.load()->next_.store(n, std::memory_order_release);
-            return;
-        }
-        curr->next_.store(n, std::memory_order_release);
+        tail_.exchange(n, std::memory_order_acq_rel)
+         ->next_.store(n, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
