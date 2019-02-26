@@ -114,17 +114,17 @@ template <typename T>
 class pool {
 
     union node {
-        T     data_;
-        node* next_;
+        T data_;
+        std::atomic<node*> next_;
     };
 
     tagged<node*> cursor_ { nullptr };
 
 public:
     ~pool() {
-        auto curr = cursor_.load(std::memory_order_acquire);
+        auto curr = cursor_.load(std::memory_order_relaxed);
         while (curr != nullptr) {
-            auto temp = curr->next_;
+            auto temp = curr->next_.load(std::memory_order_relaxed);
             delete curr;
             curr = temp;
         }
@@ -141,7 +141,7 @@ public:
             if (curr == nullptr) {
                 return &((new node { std::forward<P>(pars)... })->data_);
             }
-            if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acq_rel)) {
+            if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acquire)) {
                 break;
             }
         }
@@ -153,7 +153,7 @@ public:
         auto temp = reinterpret_cast<node*>(p);
         auto curr = cursor_.load(std::memory_order_relaxed);
         while (1) {
-            temp->next_ = curr;
+            temp->next_.store(curr, std::memory_order_relaxed);
             if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_release)) {
                 break;
             }
@@ -170,6 +170,8 @@ public:
     ~scope_exit() { f_(); }
 };
 
+namespace frl {
+
 template <typename T>
 class queue {
 
@@ -178,7 +180,7 @@ class queue {
         std::atomic<node*> next_;
     } dummy_ { {}, nullptr };
 
-    tagged     <node*> head_ { &dummy_ };
+    std::atomic<node*> head_ { &dummy_ };
     std::atomic<node*> tail_ { &dummy_ };
 
     pool<node> allocator_;
@@ -247,6 +249,18 @@ public:
          ->next_.store(n, std::memory_order_release);
     }
 
+//    void push(T const & val) {
+//        auto n = allocator_.alloc(val, nullptr);
+//        while (1) {
+//            node* temp = tail_.load(std::memory_order_relaxed);
+//            node* next = nullptr;
+//            if (temp->next_.compare_exchange_weak(next, n, std::memory_order_relaxed)) {
+//                tail_.compare_exchange_strong(temp, n, std::memory_order_release);
+//                break;
+//            }
+//        }
+//    }
+
     std::tuple<T, bool> pop() {
         T ret;
         add_ref();
@@ -257,7 +271,7 @@ public:
                 del_ref(nullptr);
                 return {};
             }
-            if (head_.compare_exchange_weak(curr, next, std::memory_order_acq_rel)) {
+            if (head_.compare_exchange_weak(curr, next, std::memory_order_acquire)) {
                 ret = next->data_;
                 del_ref(curr);
                 break;
@@ -267,4 +281,5 @@ public:
     }
 };
 
+} // namespace frl
 } // namespace m2m

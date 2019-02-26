@@ -90,27 +90,27 @@ void benchmark(int loop = 100000) {
 }
 
 int main() {
-    benchmark<locked::queue, 1, 1>();
-    benchmark<safe::queue  , 1, 1>();
-    benchmark<m2m::queue   , 1, 1>();
-    benchmark<s2s::queue   , 1, 1>();
+    benchmark<locked::queue  , 1, 1>();
+    benchmark<safe::queue    , 1, 1>();
+    benchmark<m2m::frl::queue, 1, 1>();
+    benchmark<s2s::queue     , 1, 1>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 4, 1>();
-    benchmark<safe::queue  , 4, 1>();
-    benchmark<m2m::queue   , 4, 1>();
+    benchmark<locked::queue  , 4, 1>();
+    benchmark<safe::queue    , 4, 1>();
+    benchmark<m2m::frl::queue, 4, 1>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 1, 4>();
-    benchmark<safe::queue  , 1, 4>();
-    benchmark<m2m::queue   , 1, 4>();
+    benchmark<locked::queue  , 1, 4>();
+    benchmark<safe::queue    , 1, 4>();
+    benchmark<m2m::frl::queue, 1, 4>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 4, 4>();
-    benchmark<safe::queue  , 4, 4>();
-    benchmark<m2m::queue   , 4, 4>();
+    benchmark<locked::queue  , 4, 4>();
+    benchmark<safe::queue    , 4, 4>();
+    benchmark<m2m::frl::queue, 4, 4>();
     return 0;
 }
