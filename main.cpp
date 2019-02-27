@@ -112,5 +112,23 @@ int main() {
     benchmark<locked::queue  , 4, 4>();
     benchmark<safe::queue    , 4, 4>();
     benchmark<m2m::frl::queue, 4, 4>();
+
+    std::cout << std::endl;
+
+    benchmark<locked::queue  , 8, 8>();
+    benchmark<safe::queue    , 8, 8>();
+    benchmark<m2m::frl::queue, 8, 8>();
+
+    std::cout << std::endl;
+
+    benchmark<locked::queue  , 16, 16>();
+    benchmark<safe::queue    , 16, 16>();
+    benchmark<m2m::frl::queue, 16, 16>();
+
+    std::cout << std::endl;
+
+    benchmark<locked::queue  , 32, 32>();
+    benchmark<safe::queue    , 32, 32>();
+    benchmark<m2m::frl::queue, 32, 32>();
     return 0;
 }

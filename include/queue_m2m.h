@@ -37,14 +37,14 @@ struct tagged_factor<8> {
 template <typename T, std::size_t Bytes = sizeof(T)>
 class tagged {
 
+    std::uint64_t data_ { 0 };
+
+public:
     enum : std::uint64_t {
         mask = tagged_factor<Bytes>::mask,
         incr = tagged_factor<Bytes>::incr
     };
 
-    std::uint64_t data_ { 0 };
-
-public:
     tagged() = default;
     tagged(tagged const &) = default;
 
@@ -53,7 +53,7 @@ public:
     {}
 
     tagged(T ptr, std::uint64_t tag)
-        : data_(reinterpret_cast<std::uint64_t>(ptr) | ((tag + incr) & ~mask))
+        : data_(reinterpret_cast<std::uint64_t>(ptr) | (add(tag) & ~mask))
     {}
 
     tagged(std::uint64_t num)
@@ -65,6 +65,9 @@ public:
     std::uint64_t data() const {
         return data_;
     }
+
+    static std::uint64_t add(std::uint64_t tag) { return tag + incr; }
+    static std::uint64_t del(std::uint64_t tag) { return tag - incr; }
 
     operator T() const {
         return reinterpret_cast<T>(data_ & mask);
@@ -81,6 +84,16 @@ class tagged {
 
     std::atomic<std::uint64_t> data_ { 0 };
 
+    bool compare_exchange(bool (std::atomic<std::uint64_t>::* cas)(std::uint64_t&, std::uint64_t, std::memory_order),
+                               detail::tagged<T>& exp, T val, std::memory_order order) {
+        auto num = exp.data();
+        if ((data_.*cas)(num, detail::tagged<T> { val, num }.data(), order)) {
+            return true;
+        }
+        exp = num;
+        return false;
+    }
+
 public:
     tagged() = default;
     tagged(tagged const &) = default;
@@ -91,22 +104,26 @@ public:
 
     tagged& operator=(tagged const &) = default;
 
-    operator T() const { return load(); }
+    operator T() const { return load(std::memory_order_acquire); }
 
     T    operator->() const { return  static_cast<T>(*this); }
     auto operator* () const { return *static_cast<T>(*this); }
 
     auto load(std::memory_order order) {
-        return detail::tagged<T>{ data_.load(order) };
+        return detail::tagged<T> { data_.load(order) };
+    }
+
+    void store(T val, std::memory_order order) {
+        auto exp = this->load(std::memory_order_relaxed);
+        while (!this->compare_exchange_weak(exp, val, order)) ;
     }
 
     bool compare_exchange_weak(detail::tagged<T>& exp, T val, std::memory_order order) {
-        auto num = exp.data();
-        if (data_.compare_exchange_weak(num, detail::tagged<T>{ val, num }.data(), order)) {
-            return true;
-        }
-        exp = num;
-        return false;
+        return compare_exchange(&std::atomic<std::uint64_t>::compare_exchange_weak, exp, val, order);
+    }
+
+    bool compare_exchange_strong(detail::tagged<T>& exp, T val, std::memory_order order) {
+        return compare_exchange(&std::atomic<std::uint64_t>::compare_exchange_strong, exp, val, order);
     }
 };
 
@@ -177,11 +194,11 @@ class queue {
 
     struct node {
         T data_;
-        std::atomic<node*> next_;
+        tagged<node*> next_;
     } dummy_ { {}, nullptr };
 
     std::atomic<node*> head_ { &dummy_ };
-    std::atomic<node*> tail_ { &dummy_ };
+    tagged     <node*> tail_ { &dummy_ };
 
     pool<node> allocator_;
 
@@ -245,21 +262,20 @@ public:
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        tail_.exchange(n, std::memory_order_relaxed)
-         ->next_.store(n, std::memory_order_release);
+        while (1) {
+            auto tail = tail_.load(std::memory_order_relaxed);
+            auto next = tail->next_.load(std::memory_order_relaxed);
+            if (tail == tail_.load(std::memory_order_relaxed)) {
+                if (next == nullptr) {
+                    if (tail->next_.compare_exchange_weak(next, n, std::memory_order_relaxed)) {
+                        tail_.compare_exchange_strong(tail, n, std::memory_order_release);
+                        break;
+                    }
+                }
+                else tail_.compare_exchange_weak(tail, next, std::memory_order_release);
+            }
+        }
     }
-
-//    void push(T const & val) {
-//        auto n = allocator_.alloc(val, nullptr);
-//        while (1) {
-//            node* temp = tail_.load(std::memory_order_relaxed);
-//            node* next = nullptr;
-//            if (temp->next_.compare_exchange_weak(next, n, std::memory_order_relaxed)) {
-//                tail_.compare_exchange_strong(temp, n, std::memory_order_release);
-//                break;
-//            }
-//        }
-//    }
 
     std::tuple<T, bool> pop() {
         T ret;
@@ -282,4 +298,91 @@ public:
 };
 
 } // namespace frl
+
+namespace ref {
+
+template <typename T>
+class ptr {
+
+    using tagged_t = detail::tagged<T*>;
+
+    std::atomic<std::uint64_t> data_ { 0 };
+
+    template <typename F>
+    auto ref_opt(F opt, std::memory_order order) {
+        auto old_data = data_.load(order);
+        while (1) {
+            auto add_data = opt(old_data);
+            if (data_.compare_exchange_weak(old_data, add_data, std::memory_order_release)) {
+                break;
+            }
+        }
+        return old_data;
+    }
+
+public:
+    ptr() = default;
+    ptr(ptr const &) = default;
+
+    ptr(T* p)
+        : data_(reinterpret_cast<std::uint64_t>(p))
+    {}
+
+    ptr& operator=(ptr const &) = default;
+
+    operator T*() const { return load(std::memory_order_acquire); }
+
+    T*   operator->() const { return  static_cast<T*>(*this); }
+    auto operator* () const { return *static_cast<T*>(*this); }
+
+    auto add_ref(std::memory_order order) { return ref_opt(&tagged_t::add, order); }
+    auto del_ref(std::memory_order order) { return ref_opt(&tagged_t::del, order); }
+
+    T* load(std::memory_order order) {
+        return tagged_t { add_ref(order) };
+    }
+
+    T* exchange(T* val, std::memory_order order) {
+        return tagged_t { data_.exchange(reinterpret_cast<std::uint64_t>(val), order) };
+    }
+
+    bool compare_exchange_weak(detail::tagged<T>& exp, T* val, std::memory_order order) {
+        auto num = exp.data();
+        if (data_.compare_exchange_weak(num, detail::tagged<T>{ val }.data(), order)) {
+            return true;
+        }
+        exp = num;
+        return false;
+    }
+};
+
+template <typename T>
+class queue {
+
+    struct node {
+        T data_;
+        tagged<node*> next_;
+    } dummy_ { {}, nullptr };
+
+    tagged<node*> head_ { &dummy_ };
+    tagged<node*> tail_ { &dummy_ };
+
+    pool<node> allocator_;
+
+public:
+    void quit() {}
+
+    bool empty() const {
+        return head_.load(std::memory_order_acquire)
+             ->next_.load(std::memory_order_relaxed) == nullptr;
+    }
+
+    void push(T const & val) {
+        auto n = allocator_.alloc(val, nullptr);
+        auto old_tail = tail_.exchange(n, std::memory_order_relaxed);
+        old_tail->next_.store(n, std::memory_order_release);
+    }
+};
+
+} // namespace ref
 } // namespace m2m

@@ -79,10 +79,17 @@ public:
              ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
+//    void push(T const & val) {
+//        auto n = allocator_.alloc(val, nullptr);
+//        tail_.exchange(n, std::memory_order_relaxed)
+//         ->next_.store(n, std::memory_order_release);
+//    }
+
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
-        tail_.exchange(n, std::memory_order_relaxed)
-         ->next_.store(n, std::memory_order_release);
+        auto t = tail_.load(std::memory_order_relaxed);
+        t->next_.store(n, std::memory_order_relaxed);
+        tail_.store(n, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
