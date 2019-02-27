@@ -2,6 +2,7 @@
  * https://coolshell.cn/articles/8239.html
  * http://www.voidcn.com/article/p-sijuqlbv-zs.html
  * http://blog.jobbole.com/107955/
+ * http://www.cs.rochester.edu/~scott/papers/1996_PODC_queues.pdf
 */
 
 #pragma once
@@ -11,6 +12,7 @@
 #include <utility>
 #include <tuple>
 #include <cstdint>
+#include <thread>
 
 namespace m2m {
 namespace detail {
@@ -66,6 +68,10 @@ public:
         return data_;
     }
 
+    T ptr() const {
+        return static_cast<T>(*this);
+    }
+
     static std::uint64_t add(std::uint64_t tag) { return tag + incr; }
     static std::uint64_t del(std::uint64_t tag) { return tag - incr; }
 
@@ -109,7 +115,7 @@ public:
     T    operator->() const { return  static_cast<T>(*this); }
     auto operator* () const { return *static_cast<T>(*this); }
 
-    auto load(std::memory_order order) {
+    auto load(std::memory_order order) const {
         return detail::tagged<T> { data_.load(order) };
     }
 
@@ -132,7 +138,7 @@ class pool {
 
     union node {
         T data_;
-        std::atomic<node*> next_;
+        tagged<node*> next_;
     };
 
     tagged<node*> cursor_ { nullptr };
@@ -153,27 +159,28 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
-        auto curr = cursor_.load(std::memory_order_acquire);
         while (1) {
+            auto curr = cursor_.load(std::memory_order_acquire);
             if (curr == nullptr) {
                 return &((new node { std::forward<P>(pars)... })->data_);
             }
             if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acquire)) {
-                break;
+                return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
             }
+            std::this_thread::yield();
         }
-        return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
     }
 
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
-        auto curr = cursor_.load(std::memory_order_relaxed);
         while (1) {
+            auto curr = cursor_.load(std::memory_order_relaxed);
             temp->next_.store(curr, std::memory_order_relaxed);
             if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_release)) {
                 break;
             }
+            std::this_thread::yield();
         }
     }
 };
@@ -197,8 +204,8 @@ class queue {
         tagged<node*> next_;
     } dummy_ { {}, nullptr };
 
-    std::atomic<node*> head_ { &dummy_ };
-    tagged     <node*> tail_ { &dummy_ };
+    tagged<node*> head_ { &dummy_ };
+    tagged<node*> tail_ { &dummy_ };
 
     pool<node> allocator_;
 
@@ -272,26 +279,36 @@ public:
                         break;
                     }
                 }
-                else tail_.compare_exchange_weak(tail, next, std::memory_order_release);
+                else tail_.compare_exchange_strong(tail, next, std::memory_order_release);
             }
+            std::this_thread::yield();
         }
     }
 
     std::tuple<T, bool> pop() {
         T ret;
-        add_ref();
-        auto curr = head_.load(std::memory_order_acquire);
         while (1) {
-            node* next = curr->next_.load(std::memory_order_relaxed);
-            if (next == nullptr) {
-                del_ref(nullptr);
-                return {};
+            auto head = head_.load(std::memory_order_acquire);
+            auto tail = tail_.load(std::memory_order_relaxed);
+            auto next = head->next_.load(std::memory_order_relaxed);
+            if (head == head_.load(std::memory_order_relaxed)) {
+                if (head.ptr() == tail.ptr()) {
+                    if (next == nullptr) {
+                        return {};
+                    }
+                    tail_.compare_exchange_strong(tail, next, std::memory_order_relaxed);
+                }
+                else {
+                    ret = next->data_;
+                    if (head_.compare_exchange_weak(head, next, std::memory_order_relaxed)) {
+                        if (head != &dummy_) {
+                            allocator_.free(head);
+                        }
+                        break;
+                    }
+                }
             }
-            if (head_.compare_exchange_weak(curr, next, std::memory_order_acquire)) {
-                ret = next->data_;
-                del_ref(curr);
-                break;
-            }
+            std::this_thread::yield();
         }
         return std::make_tuple(ret, true);
     }
