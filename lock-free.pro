@@ -16,3 +16,5 @@ HEADERS += \
     include/queue_locked.h \
     include/queue_s2s.h \
     include/queue_m2m.h
+
+unix:LIBS += -lpthread
