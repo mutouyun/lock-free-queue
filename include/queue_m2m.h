@@ -194,8 +194,6 @@ public:
     ~scope_exit() { f_(); }
 };
 
-namespace frl {
-
 template <typename T>
 class queue {
 
@@ -314,92 +312,4 @@ public:
     }
 };
 
-} // namespace frl
-
-namespace ref {
-
-template <typename T>
-class ptr {
-
-    using tagged_t = detail::tagged<T*>;
-
-    std::atomic<std::uint64_t> data_ { 0 };
-
-    template <typename F>
-    auto ref_opt(F opt, std::memory_order order) {
-        auto old_data = data_.load(order);
-        while (1) {
-            auto add_data = opt(old_data);
-            if (data_.compare_exchange_weak(old_data, add_data, std::memory_order_release)) {
-                break;
-            }
-        }
-        return old_data;
-    }
-
-public:
-    ptr() = default;
-    ptr(ptr const &) = default;
-
-    ptr(T* p)
-        : data_(reinterpret_cast<std::uint64_t>(p))
-    {}
-
-    ptr& operator=(ptr const &) = default;
-
-    operator T*() const { return load(std::memory_order_acquire); }
-
-    T*   operator->() const { return  static_cast<T*>(*this); }
-    auto operator* () const { return *static_cast<T*>(*this); }
-
-    auto add_ref(std::memory_order order) { return ref_opt(&tagged_t::add, order); }
-    auto del_ref(std::memory_order order) { return ref_opt(&tagged_t::del, order); }
-
-    T* load(std::memory_order order) {
-        return tagged_t { add_ref(order) };
-    }
-
-    T* exchange(T* val, std::memory_order order) {
-        return tagged_t { data_.exchange(reinterpret_cast<std::uint64_t>(val), order) };
-    }
-
-    bool compare_exchange_weak(detail::tagged<T>& exp, T* val, std::memory_order order) {
-        auto num = exp.data();
-        if (data_.compare_exchange_weak(num, detail::tagged<T>{ val }.data(), order)) {
-            return true;
-        }
-        exp = num;
-        return false;
-    }
-};
-
-template <typename T>
-class queue {
-
-    struct node {
-        T data_;
-        tagged<node*> next_;
-    } dummy_ { {}, nullptr };
-
-    tagged<node*> head_ { &dummy_ };
-    tagged<node*> tail_ { &dummy_ };
-
-    pool<node> allocator_;
-
-public:
-    void quit() {}
-
-    bool empty() const {
-        return head_.load(std::memory_order_acquire)
-             ->next_.load(std::memory_order_relaxed) == nullptr;
-    }
-
-    void push(T const & val) {
-        auto n = allocator_.alloc(val, nullptr);
-        auto old_tail = tail_.exchange(n, std::memory_order_relaxed);
-        old_tail->next_.store(n, std::memory_order_release);
-    }
-};
-
-} // namespace ref
 } // namespace m2m
