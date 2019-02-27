@@ -12,7 +12,6 @@
 #include <utility>
 #include <tuple>
 #include <cstdint>
-#include <thread>
 
 namespace m2m {
 namespace detail {
@@ -159,28 +158,26 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
+        auto curr = cursor_.load(std::memory_order_acquire);
         while (1) {
-            auto curr = cursor_.load(std::memory_order_acquire);
             if (curr == nullptr) {
                 return &((new node { std::forward<P>(pars)... })->data_);
             }
             if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acquire)) {
                 return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
             }
-            std::this_thread::yield();
         }
     }
 
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
+        auto curr = cursor_.load(std::memory_order_relaxed);
         while (1) {
-            auto curr = cursor_.load(std::memory_order_relaxed);
             temp->next_.store(curr, std::memory_order_relaxed);
             if (cursor_.compare_exchange_weak(curr, temp, std::memory_order_release)) {
                 break;
             }
-            std::this_thread::yield();
         }
     }
 };
@@ -207,56 +204,6 @@ class queue {
 
     pool<node> allocator_;
 
-    std::atomic<unsigned> counter_   { 0 };
-    std::atomic<node*>    free_list_ { nullptr };
-
-    void add_ref() {
-        counter_.fetch_add(1, std::memory_order_release);
-    }
-
-    void del_ref(node* item) {
-        if (item == &dummy_ || item == nullptr) {
-            counter_.fetch_sub(1, std::memory_order_release);
-            return;
-        }
-        auto put_free_list = [this](node* first, node* last) {
-            auto list = free_list_.load(std::memory_order_relaxed);
-            while (1) {
-                last->next_.store(list, std::memory_order_relaxed);
-                if (free_list_.compare_exchange_weak(list, first, std::memory_order_release)) {
-                    break;
-                }
-            }
-        };
-        if (counter_.load(std::memory_order_acquire) > 1) {
-            put_free_list(item, item);
-            counter_.fetch_sub(1, std::memory_order_release);
-        }
-        else {
-            auto temp = free_list_.exchange(nullptr, std::memory_order_acq_rel);
-            if (counter_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-                while (temp != nullptr) {
-                    auto next = temp->next_.load(std::memory_order_relaxed);
-                    allocator_.free(temp);
-                    temp = next;
-                }
-            }
-            else if (temp != nullptr) {
-                // fetch the last
-                auto last = temp;
-                while (1) {
-                    auto next = last->next_.load(std::memory_order_relaxed);
-                    if (next == nullptr) {
-                        break;
-                    }
-                    last = next;
-                }
-                put_free_list(temp, last);
-            }
-            allocator_.free(item);
-        }
-    }
-
 public:
     void quit() {}
 
@@ -279,7 +226,6 @@ public:
                 }
                 else tail_.compare_exchange_strong(tail, next, std::memory_order_release);
             }
-            std::this_thread::yield();
         }
     }
 
@@ -306,7 +252,6 @@ public:
                     }
                 }
             }
-            std::this_thread::yield();
         }
         return std::make_tuple(ret, true);
     }

@@ -89,7 +89,7 @@ public:
 
 } // namespace unsafe
 
-namespace safe {
+namespace cond {
 
 template <typename T>
 class queue : unsafe::queue<T> {
@@ -140,4 +140,4 @@ public:
     }
 };
 
-} // namespace safe
+} // namespace cond
