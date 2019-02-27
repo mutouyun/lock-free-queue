@@ -1,0 +1,32 @@
+language: cpp
+os: linux
+dist: xenial
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - g++-7
+      - qtbase5-dev
+
+matrix:
+  include:
+    - compiler: gcc
+      env:
+        - MATRIX_EVAL="USING_CMAKE=0 CC=gcc-7 && CXX=g++-7"
+    - compiler: clang
+
+before_install:
+  - eval "${MATRIX_EVAL}"
+  - qmake -v
+
+script:
+  - qmake -o Makefile lock-free.pro QMAKE_CC=$CC QMAKE_CXX=$CXX QMAKE_LINK=$CXX QMAKE_CXXFLAGS+=-std=gnu++1z
+  - make
+  - ./output/lock-free
+
+notifications:
+  slack:
+    on_success: never
+    on_failure: never
