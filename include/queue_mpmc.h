@@ -140,7 +140,8 @@ class pool {
         tagged<node*> next_;
     };
 
-    tagged<node*> cursor_ { nullptr };
+    tagged     <node*> cursor_ { nullptr };
+    std::atomic<node*> el_     { nullptr };
 
 public:
     ~pool() {
@@ -158,20 +159,28 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
-        auto curr = cursor_.load(std::memory_order_acquire);
-        while (1) {
-            if (curr == nullptr) {
-                return &((new node { std::forward<P>(pars)... })->data_);
-            }
-            if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acquire)) {
-                return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
+        detail::tagged<node*> curr = el_.exchange(nullptr, std::memory_order_relaxed);
+        if (curr == nullptr) {
+            curr = cursor_.load(std::memory_order_acquire);
+            while (1) {
+                if (curr == nullptr) {
+                    return &((new node { std::forward<P>(pars)... })->data_);
+                }
+                if (cursor_.compare_exchange_weak(curr, curr->next_, std::memory_order_acquire)) {
+                    return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
+                }
             }
         }
+        return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
     }
 
     void free(void* p) {
         if (p == nullptr) return;
         auto temp = reinterpret_cast<node*>(p);
+        temp = el_.exchange(temp, std::memory_order_relaxed);
+        if (temp == nullptr) {
+            return;
+        }
         auto curr = cursor_.load(std::memory_order_relaxed);
         while (1) {
             temp->next_.store(curr, std::memory_order_relaxed);

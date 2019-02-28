@@ -17,7 +17,8 @@
 
 #include "stopwatch.hpp"
 
-constexpr std::uint64_t calc(int n) {
+template <typename T>
+constexpr std::uint64_t calc(T n) {
     std::uint64_t r = n;
     return (r * (r - 1)) / 2;
 }
@@ -36,15 +37,15 @@ std::string type_name() {
 }
 
 template <template <typename> class Queue, int PushN, int PopN>
-void benchmark(int loop = 100000) {
-    Queue<int> que;
+void benchmark(int loop = 1000000) {
+    Queue<std::int64_t> que;
     capo::stopwatch<> sw { true };
     int cnt = (loop / PushN);
 
     std::thread push_trds[PushN];
     for (int i = 0; i < PushN; ++i) {
         (push_trds[i] = std::thread {[i, cnt, &que] {
-            for (int k = 0; k < 100; ++k) {
+            for (int k = 0; k < 10; ++k) {
                 int beg = i * cnt;
                 for (int n = beg; n < (beg + cnt); ++n) {
                     que.push(n);
@@ -80,13 +81,13 @@ void benchmark(int loop = 100000) {
         pop_trds[i].join();
         ret += sum[i];
     }
-    if ((calc(loop) * 100) != ret) {
+    if ((calc(loop) * 10) != ret) {
         std::cout << "fail... " << ret << std::endl;
     }
 
     auto t = sw.elapsed<std::chrono::milliseconds>();
     std::cout << type_name<decltype(que)>() << " "
-              << PushN << ":" << PopN << " done with " << t << "ms\t" << std::endl;
+              << PushN << ":" << PopN << " - " << t << "ms\t" << std::endl;
 }
 
 int main() {
@@ -130,5 +131,11 @@ int main() {
     benchmark<lock::queue, 32, 32>();
     benchmark<cond::queue, 32, 32>();
     benchmark<mpmc::queue, 32, 32>();
+
+    std::cout << std::endl;
+
+    benchmark<lock::queue, 64, 64>();
+    benchmark<cond::queue, 64, 64>();
+    benchmark<mpmc::queue, 64, 64>();
     return 0;
 }
