@@ -171,7 +171,7 @@ public:
 
     template <typename... P>
     T* alloc(P&&... pars) {
-        tagged<node*>::dt_t curr = el_.exchange(nullptr, std::memory_order_relaxed);
+        typename tagged<node*>::dt_t curr = el_.exchange(nullptr, std::memory_order_relaxed);
         if (curr.ptr() == nullptr) {
             curr = cursor_.tag_load(std::memory_order_acquire);
             while (1) {
