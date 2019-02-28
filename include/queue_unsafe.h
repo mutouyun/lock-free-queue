@@ -62,13 +62,13 @@ public:
     }
 
     void push(T const & val) {
-        auto n = allocator_.alloc(val, nullptr);
+        auto p = allocator_.alloc(val, nullptr);
         if (tail_ == nullptr) {
-            head_ = tail_ = n;
+            head_ = tail_ = p;
         }
         else {
-            tail_->next_ = n;
-            tail_ = n;
+            tail_->next_ = p;
+            tail_ = p;
         }
     }
 

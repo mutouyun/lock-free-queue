@@ -94,10 +94,10 @@ public:
 //    }
 
     void push(T const & val) {
-        auto n = allocator_.alloc(val, nullptr);
+        auto p = allocator_.alloc(val, nullptr);
         auto t = tail_.load(std::memory_order_relaxed);
-        t->next_.store(n, std::memory_order_relaxed);
-        tail_.store(n, std::memory_order_release);
+        t->next_.store(p, std::memory_order_relaxed);
+        tail_.store(p, std::memory_order_release);
     }
 
     std::tuple<T, bool> pop() {
