@@ -234,23 +234,24 @@ public:
 
     std::tuple<T, bool> pop() {
         T ret;
-        auto head = head_.load(std::memory_order_acquire);
+        auto head = head_.load(std::memory_order_relaxed);
         auto tail = tail_.load(std::memory_order_relaxed);
         while (1) {
+            std::atomic_thread_fence(std::memory_order_acq_rel);
             auto next = head->next_.load(std::memory_order_relaxed);
             if (head == head_.load(std::memory_order_relaxed)) {
+                if (next == nullptr) {
+                    return {};
+                }
                 if (head.ptr() == tail.ptr()) {
-                    if (next == nullptr) {
-                        return {};
-                    }
-                    if (!tail_.compare_exchange_weak(tail, next, std::memory_order_acquire)) {
+                    if (!tail_.compare_exchange_weak(tail, next, std::memory_order_relaxed)) {
                         head = head_.load(std::memory_order_relaxed);
                         continue;
                     }
                 }
                 else {
                     ret = next->data_;
-                    if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
+                    if (head_.compare_exchange_weak(head, next, std::memory_order_relaxed)) {
                         if (head != &dummy_) {
                             allocator_.free(head);
                         }
@@ -262,7 +263,7 @@ public:
                     }
                 }
             }
-            head = head_.load(std::memory_order_acquire);
+            head = head_.load(std::memory_order_relaxed);
             tail = tail_.load(std::memory_order_relaxed);
         }
         return std::make_tuple(ret, true);
