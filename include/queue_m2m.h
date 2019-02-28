@@ -214,8 +214,8 @@ public:
 
     void push(T const & val) {
         auto n = allocator_.alloc(val, nullptr);
+        auto tail = tail_.load(std::memory_order_relaxed);
         while (1) {
-            auto tail = tail_.load(std::memory_order_relaxed);
             auto next = tail->next_.load(std::memory_order_relaxed);
             if (tail == tail_.load(std::memory_order_relaxed)) {
                 if (next == nullptr) {
@@ -224,34 +224,46 @@ public:
                         break;
                     }
                 }
-                else tail_.compare_exchange_strong(tail, next, std::memory_order_release);
+                else if (!tail_.compare_exchange_weak(tail, next, std::memory_order_release)) {
+                    continue;
+                }
             }
+            tail = tail_.load(std::memory_order_relaxed);
         }
     }
 
     std::tuple<T, bool> pop() {
         T ret;
+        auto head = head_.load(std::memory_order_acquire);
+        auto tail = tail_.load(std::memory_order_relaxed);
         while (1) {
-            auto head = head_.load(std::memory_order_acquire);
-            auto tail = tail_.load(std::memory_order_relaxed);
             auto next = head->next_.load(std::memory_order_relaxed);
             if (head == head_.load(std::memory_order_relaxed)) {
                 if (head.ptr() == tail.ptr()) {
                     if (next == nullptr) {
                         return {};
                     }
-                    tail_.compare_exchange_strong(tail, next, std::memory_order_relaxed);
+                    if (!tail_.compare_exchange_weak(tail, next, std::memory_order_acquire)) {
+                        head = head_.load(std::memory_order_relaxed);
+                        continue;
+                    }
                 }
                 else {
                     ret = next->data_;
-                    if (head_.compare_exchange_weak(head, next, std::memory_order_relaxed)) {
+                    if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
                         if (head != &dummy_) {
                             allocator_.free(head);
                         }
                         break;
                     }
+                    else {
+                        tail = tail_.load(std::memory_order_relaxed);
+                        continue;
+                    }
                 }
             }
+            head = head_.load(std::memory_order_acquire);
+            tail = tail_.load(std::memory_order_relaxed);
         }
         return std::make_tuple(ret, true);
     }
