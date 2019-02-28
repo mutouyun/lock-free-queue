@@ -7,8 +7,8 @@
 
 #include "queue_unsafe.h"
 #include "queue_locked.h"
-#include "queue_s2s.h"
-#include "queue_m2m.h"
+#include "queue_spsc.h"
+#include "queue_mpmc.h"
 
 #if defined(__GNUC__)
 #   include <memory>
@@ -85,50 +85,50 @@ void benchmark(int loop = 100000) {
     }
 
     auto t = sw.elapsed<std::chrono::milliseconds>();
-    std::cout << PushN << ":" << PopN << " done! "
-              << t << "ms\t- " << type_name<decltype(que)>() << std::endl;
+    std::cout << type_name<decltype(que)>() << " "
+              << PushN << ":" << PopN << " done with " << t << "ms\t" << std::endl;
 }
 
 int main() {
-    benchmark<locked::queue, 1, 1>();
-    benchmark<cond::queue  , 1, 1>();
-    benchmark<m2m::queue   , 1, 1>();
-    benchmark<s2s::queue   , 1, 1>();
+    benchmark<lock::queue, 1, 1>();
+    benchmark<cond::queue, 1, 1>();
+    benchmark<mpmc::queue, 1, 1>();
+    benchmark<spsc::queue, 1, 1>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 4, 1>();
-    benchmark<cond::queue  , 4, 1>();
-    benchmark<m2m::queue   , 4, 1>();
+    benchmark<lock::queue, 4, 1>();
+    benchmark<cond::queue, 4, 1>();
+    benchmark<mpmc::queue, 4, 1>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 1, 4>();
-    benchmark<cond::queue  , 1, 4>();
-    benchmark<m2m::queue   , 1, 4>();
+    benchmark<lock::queue, 1, 4>();
+    benchmark<cond::queue, 1, 4>();
+    benchmark<mpmc::queue, 1, 4>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 4, 4>();
-    benchmark<cond::queue  , 4, 4>();
-    benchmark<m2m::queue   , 4, 4>();
+    benchmark<lock::queue, 4, 4>();
+    benchmark<cond::queue, 4, 4>();
+    benchmark<mpmc::queue, 4, 4>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 8, 8>();
-    benchmark<cond::queue  , 8, 8>();
-    benchmark<m2m::queue   , 8, 8>();
+    benchmark<lock::queue, 8, 8>();
+    benchmark<cond::queue, 8, 8>();
+    benchmark<mpmc::queue, 8, 8>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 16, 16>();
-    benchmark<cond::queue  , 16, 16>();
-    benchmark<m2m::queue   , 16, 16>();
+    benchmark<lock::queue, 16, 16>();
+    benchmark<cond::queue, 16, 16>();
+    benchmark<mpmc::queue, 16, 16>();
 
     std::cout << std::endl;
 
-    benchmark<locked::queue, 32, 32>();
-    benchmark<cond::queue  , 32, 32>();
-    benchmark<m2m::queue   , 32, 32>();
+    benchmark<lock::queue, 32, 32>();
+    benchmark<cond::queue, 32, 32>();
+    benchmark<mpmc::queue, 32, 32>();
     return 0;
 }

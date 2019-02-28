@@ -4,7 +4,7 @@
 #include <new>
 #include <utility>
 
-namespace s2s {
+namespace spsc {
 
 template <typename T>
 class pool {
@@ -106,4 +106,4 @@ public:
     }
 };
 
-} // namespace s2s
+} // namespace spsc

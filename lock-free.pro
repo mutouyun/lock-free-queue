@@ -14,7 +14,7 @@ SOURCES += \
 HEADERS += \
     include/queue_unsafe.h \
     include/queue_locked.h \
-    include/queue_s2s.h \
-    include/queue_m2m.h
+    include/queue_spsc.h \
+    include/queue_mpmc.h
 
 unix:LIBS += -lpthread

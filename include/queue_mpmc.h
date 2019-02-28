@@ -13,7 +13,7 @@
 #include <tuple>
 #include <cstdint>
 
-namespace m2m {
+namespace mpmc {
 namespace detail {
 
 template <std::size_t Bytes>
@@ -270,4 +270,4 @@ public:
     }
 };
 
-} // namespace m2m
+} // namespace mpmc

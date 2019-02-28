@@ -5,7 +5,7 @@
 #include <memory>
 #include <functional>
 
-namespace locked {
+namespace lock {
 
 template <typename T>
 class pool {
@@ -100,4 +100,4 @@ public:
     }
 };
 
-} // namespace locked
+} // namespace lock
