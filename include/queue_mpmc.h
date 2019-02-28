@@ -229,15 +229,15 @@ public:
         auto p = allocator_.alloc(nullptr, val);
         auto tail = tail_.tag_load(std::memory_order_relaxed);
         while (1) {
-            auto next = tail->next_.tag_load(std::memory_order_relaxed);
+            auto next = tail->next_.tag_load(std::memory_order_acquire);
             if (tail == tail_.tag_load(std::memory_order_relaxed)) {
                 if (next.ptr() == nullptr) {
-                    if (tail->next_.compare_exchange_weak(next, p, std::memory_order_release)) {
+                    if (tail->next_.compare_exchange_weak(next, p, std::memory_order_relaxed)) {
                         tail_.compare_exchange_strong(tail, p, std::memory_order_release);
                         break;
                     }
                 }
-                else if (!tail_.compare_exchange_weak(tail, next.ptr(), std::memory_order_release)) {
+                else if (!tail_.compare_exchange_weak(tail, next.ptr(), std::memory_order_relaxed)) {
                     continue;
                 }
             }
@@ -247,34 +247,29 @@ public:
 
     std::tuple<T, bool> pop() {
         T ret;
-        auto head = head_.tag_load(std::memory_order_relaxed);
-        auto tail = tail_.tag_load(std::memory_order_relaxed);
+        auto head = head_.tag_load(std::memory_order_acquire);
+        auto tail = tail_.tag_load(std::memory_order_acquire);
         while (1) {
             auto next = head->next_.load(std::memory_order_acquire);
             if (head == head_.tag_load(std::memory_order_relaxed)) {
-                if (next == nullptr) {
-                    return {};
-                }
                 if (head.ptr() == tail.ptr()) {
-                    if (!tail_.compare_exchange_weak(tail, next, std::memory_order_relaxed)) {
-                        head = head_.tag_load(std::memory_order_relaxed);
-                        continue;
+                    if (next == nullptr) {
+                        return {};
                     }
+                    tail_.compare_exchange_weak(tail, next, std::memory_order_relaxed);
                 }
                 else {
                     ret = next->data_;
-                    if (head_.compare_exchange_weak(head, next, std::memory_order_relaxed)) {
+                    if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
                         allocator_.free(head.ptr());
                         break;
                     }
-                    else {
-                        tail = tail_.tag_load(std::memory_order_relaxed);
-                        continue;
-                    }
+                    tail = tail_.tag_load(std::memory_order_acquire);
+                    continue;
                 }
             }
-            head = head_.tag_load(std::memory_order_relaxed);
-            tail = tail_.tag_load(std::memory_order_relaxed);
+            head = head_.tag_load(std::memory_order_acquire);
+            tail = tail_.tag_load(std::memory_order_acquire);
         }
         return std::make_tuple(ret, true);
     }
