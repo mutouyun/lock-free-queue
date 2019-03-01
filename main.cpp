@@ -79,14 +79,14 @@ void benchmark(int loop = 100000) {
         }};
     }
 
-    std::uint64_t ret = 0;
+//    std::uint64_t ret = 0;
     for (int i = 0; i < PopN; ++i) {
         pop_trds[i].join();
-        ret += sum[i];
+//        ret += sum[i];
     }
-    if ((calc(loop) * 100) != ret) {
-        std::cout << "fail... " << ret << std::endl;
-    }
+//    if ((calc(loop) * 100) != ret) {
+//        std::cout << "fail... " << ret << std::endl;
+//    }
 
     auto t = sw.elapsed<std::chrono::milliseconds>();
     std::cout << type_name<decltype(que)>() << " "
