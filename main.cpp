@@ -113,6 +113,7 @@ void benchmark_batch(int loop = 100000) {
         benchmark<(PushN <= 1 ? 1 : decltype(index)::value + 1),
                   (PopN  <= 1 ? 1 : decltype(index)::value + 1), Queue>(loop);
     });
+    std::cout << std::endl;
 }
 
 template <int PushN, int PopN,
@@ -135,25 +136,20 @@ int main() {
 
     std::cout << std::endl;
 
-    benchmark_batch<1, 16, lock::queue,
-                           cond::queue,
-                           mpmc::queue,
-                           mpmc::qring,
-                           mpmc::qspmc>();
+    benchmark_batch<1, 8, lock::queue,
+                          cond::queue,
+                          mpmc::queue,
+                          mpmc::qring,
+                          mpmc::qspmc>();
 
-    std::cout << std::endl;
+    benchmark_batch<8, 1, lock::queue,
+                          cond::queue,
+                          mpmc::queue,
+                          mpmc::qring>();
 
-    benchmark_batch<16, 1, lock::queue,
-                           cond::queue,
-                           mpmc::queue,
-                           mpmc::qring>();
-
-    std::cout << std::endl;
-
-    benchmark_batch<16, 16, lock::queue,
-                            cond::queue,
-                            mpmc::queue,
-                            mpmc::qring>();
-
+    benchmark_batch<8, 8, lock::queue,
+                          cond::queue,
+                          mpmc::queue,
+                          mpmc::qring>();
     return 0;
 }
