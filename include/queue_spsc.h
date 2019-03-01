@@ -119,7 +119,7 @@ public:
 };
 
 template <typename T>
-class ring {
+class qring {
 public:
     enum : std::size_t {
         elem_max = (std::numeric_limits<std::uint8_t>::max)() + 1, // default is 255 + 1

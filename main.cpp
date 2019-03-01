@@ -97,42 +97,49 @@ int main() {
     benchmark<cond::queue, 1, 1>();
     benchmark<mpmc::queue, 1, 1>();
     benchmark<spsc::queue, 1, 1>();
-    benchmark<spsc::ring , 1, 1>();
+    benchmark<mpmc::qring, 1, 1>();
+    benchmark<spsc::qring, 1, 1>();
 
     std::cout << std::endl;
 
     benchmark<lock::queue, 4, 1>();
     benchmark<cond::queue, 4, 1>();
     benchmark<mpmc::queue, 4, 1>();
+    benchmark<mpmc::qring, 4, 1>();
 
     std::cout << std::endl;
 
     benchmark<lock::queue, 1, 4>();
     benchmark<cond::queue, 1, 4>();
     benchmark<mpmc::queue, 1, 4>();
+    benchmark<mpmc::qring, 1, 4>();
 
     std::cout << std::endl;
 
     benchmark<lock::queue, 4, 4>();
     benchmark<cond::queue, 4, 4>();
     benchmark<mpmc::queue, 4, 4>();
+    benchmark<mpmc::qring, 4, 4>();
 
     std::cout << std::endl;
 
     benchmark<lock::queue, 8, 8>();
     benchmark<cond::queue, 8, 8>();
     benchmark<mpmc::queue, 8, 8>();
+    benchmark<mpmc::qring, 8, 8>();
 
     std::cout << std::endl;
 
     benchmark<lock::queue, 16, 16>();
     benchmark<cond::queue, 16, 16>();
     benchmark<mpmc::queue, 16, 16>();
+    benchmark<mpmc::qring, 16, 16>();
 
     std::cout << std::endl;
 
     benchmark<lock::queue, 32, 32>();
     benchmark<cond::queue, 32, 32>();
     benchmark<mpmc::queue, 32, 32>();
+    benchmark<mpmc::qring, 32, 32>();
     return 0;
 }
