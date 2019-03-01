@@ -130,7 +130,7 @@ int main() {
                     cond::queue,
                     mpmc::queue,
                     mpmc::qring,
-                    mpmc::qspmc,
+                    spmc::qring,
                     spsc::queue,
                     spsc::qring>();
 
@@ -140,7 +140,7 @@ int main() {
                           cond::queue,
                           mpmc::queue,
                           mpmc::qring,
-                          mpmc::qspmc>();
+                          spmc::qring>();
 
     benchmark_batch<8, 1, lock::queue,
                           cond::queue,

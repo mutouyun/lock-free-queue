@@ -271,8 +271,12 @@ public:
     }
 };
 
+} // namespace mpmc
+
+namespace spmc {
+
 template <typename T>
-class qspmc : public spsc::qring<T> {
+class qring : public spsc::qring<T> {
 protected:
     using spsc::qring<T>::rd_;
     using spsc::qring<T>::wt_;
@@ -295,13 +299,17 @@ public:
     }
 };
 
+} // namespace spmc
+
+namespace mpmc {
+
 template <typename T>
-class qring : public qspmc<T> {
+class qring : public spmc::qring<T> {
 protected:
-    using qspmc<T>::rd_;
-    using qspmc<T>::wt_;
-    using qspmc<T>::block_;
-    using qspmc<T>::index_of;
+    using spmc::qring<T>::rd_;
+    using spmc::qring<T>::wt_;
+    using spmc::qring<T>::block_;
+    using spmc::qring<T>::index_of;
 
     std::atomic<std::uint16_t> ct_ { 0 }; // commit index
 
