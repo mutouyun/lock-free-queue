@@ -273,6 +273,12 @@ public:
 
 template <typename T>
 class qspmc : public spsc::qring<T> {
+protected:
+    using spsc::qring<T>::rd_;
+    using spsc::qring<T>::wt_;
+    using spsc::qring<T>::block_;
+    using spsc::qring<T>::index_of;
+
 public:
     std::tuple<T, bool> pop() {
         while (1) {
@@ -292,6 +298,11 @@ public:
 template <typename T>
 class qring : public qspmc<T> {
 protected:
+    using qspmc<T>::rd_;
+    using qspmc<T>::wt_;
+    using qspmc<T>::block_;
+    using qspmc<T>::index_of;
+
     std::atomic<std::uint16_t> ct_ { 0 }; // commit index
 
 public:
