@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <thread>
 
+#include "queue_spsc.h"
+
 namespace mpmc {
 namespace detail {
 
@@ -270,31 +272,29 @@ public:
 };
 
 template <typename T>
-class qring {
+class qspmc : public spsc::qring<T> {
 public:
-    enum : std::size_t {
-        elem_max = (std::numeric_limits<std::uint8_t>::max)() + 1, // default is 255 + 1
-    };
+    std::tuple<T, bool> pop() {
+        while (1) {
+            auto cur_rd = rd_.load(std::memory_order_relaxed);
+            auto id_rd = index_of(cur_rd);
+            if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
+                return {}; // empty
+            }
+            auto ret = block_[id_rd];
+            if (rd_.compare_exchange_weak(cur_rd, cur_rd + 1, std::memory_order_release)) {
+                return std::make_tuple(ret, true);
+            }
+        }
+    }
+};
 
-private:
-    T block_[elem_max];
-
-    std::atomic<std::uint16_t> rd_ { 0 }; // read index
-    std::atomic<std::uint16_t> wt_ { 0 }; // write index
+template <typename T>
+class qring : public qspmc<T> {
+protected:
     std::atomic<std::uint16_t> ct_ { 0 }; // commit index
 
-    constexpr static std::uint8_t index_of(std::uint16_t index) noexcept {
-        return static_cast<std::uint8_t>(index);
-    }
-
 public:
-    void quit() {}
-
-    bool empty() const {
-        return index_of(rd_.load(std::memory_order_relaxed)) ==
-               index_of(wt_.load(std::memory_order_acquire));
-    }
-
     bool push(T const & val) {
         std::uint16_t cur_ct, nxt_ct;
         while (1) {
@@ -316,20 +316,6 @@ public:
             std::this_thread::yield();
         }
         return true;
-    }
-
-    std::tuple<T, bool> pop() {
-        while (1) {
-            auto cur_rd = rd_.load(std::memory_order_relaxed);
-            auto id_rd = index_of(cur_rd);
-            if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
-                return {}; // empty
-            }
-            auto ret = block_[id_rd];
-            if (rd_.compare_exchange_weak(cur_rd, cur_rd + 1, std::memory_order_release)) {
-                return std::make_tuple(ret, true);
-            }
-        }
     }
 };
 

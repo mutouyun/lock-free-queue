@@ -125,7 +125,7 @@ public:
         elem_max = (std::numeric_limits<std::uint8_t>::max)() + 1, // default is 255 + 1
     };
 
-private:
+protected:
     T block_[elem_max];
 
     std::atomic<std::uint16_t> rd_ { 0 }; // read index

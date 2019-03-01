@@ -4,6 +4,7 @@
 #include <typeinfo>
 #include <string>
 #include <cstdint>
+#include <type_traits>
 
 #include "queue_unsafe.h"
 #include "queue_locked.h"
@@ -36,7 +37,7 @@ std::string type_name() {
 #endif/*__GNUC__*/
 }
 
-template <template <typename> class Queue, int PushN, int PopN>
+template <int PushN, int PopN, template <typename> class Queue>
 void benchmark(int loop = 100000) {
     Queue<int> que;
     capo::stopwatch<> sw { true };
@@ -92,54 +93,67 @@ void benchmark(int loop = 100000) {
               << PushN << ":" << PopN << " - " << t << "ms\t" << std::endl;
 }
 
+template <int PushN, int PopN,
+          template <typename> class Q1,
+          template <typename> class Q2,
+          template <typename> class... Qs>
+void benchmark(int loop = 100000) {
+    benchmark<PushN, PopN, Q1>(loop);
+    benchmark<PushN, PopN, Q2, Qs...>(loop);
+}
+
+template <typename F, std::size_t...I>
+constexpr void static_for(std::index_sequence<I...>, F&& f) {
+    auto expand = { (f(std::integral_constant<size_t, I>{}), 0)... };
+}
+
+template <int PushN, int PopN, template <typename> class Queue>
+void benchmark_batch(int loop = 100000) {
+    static_for(std::make_index_sequence<(std::max)(PushN, PopN)>{}, [loop](auto index) {
+        benchmark<(PushN <= 1 ? 1 : decltype(index)::value + 1),
+                  (PopN  <= 1 ? 1 : decltype(index)::value + 1), Queue>(loop);
+    });
+}
+
+template <int PushN, int PopN,
+          template <typename> class Q1,
+          template <typename> class Q2,
+          template <typename> class... Qs>
+void benchmark_batch(int loop = 100000) {
+    benchmark_batch<PushN, PopN, Q1>(loop);
+    benchmark_batch<PushN, PopN, Q2, Qs...>(loop);
+}
+
 int main() {
-    benchmark<lock::queue, 1, 1>();
-    benchmark<cond::queue, 1, 1>();
-    benchmark<mpmc::queue, 1, 1>();
-    benchmark<spsc::queue, 1, 1>();
-    benchmark<mpmc::qring, 1, 1>();
-    benchmark<spsc::qring, 1, 1>();
+    benchmark<1, 1, lock::queue,
+                    cond::queue,
+                    mpmc::queue,
+                    mpmc::qring,
+                    mpmc::qspmc,
+                    spsc::queue,
+                    spsc::qring>();
 
     std::cout << std::endl;
 
-    benchmark<lock::queue, 4, 1>();
-    benchmark<cond::queue, 4, 1>();
-    benchmark<mpmc::queue, 4, 1>();
-    benchmark<mpmc::qring, 4, 1>();
+    benchmark_batch<1, 16, lock::queue,
+                           cond::queue,
+                           mpmc::queue,
+                           mpmc::qring,
+                           mpmc::qspmc>();
 
     std::cout << std::endl;
 
-    benchmark<lock::queue, 1, 4>();
-    benchmark<cond::queue, 1, 4>();
-    benchmark<mpmc::queue, 1, 4>();
-    benchmark<mpmc::qring, 1, 4>();
+    benchmark_batch<16, 1, lock::queue,
+                           cond::queue,
+                           mpmc::queue,
+                           mpmc::qring>();
 
     std::cout << std::endl;
 
-    benchmark<lock::queue, 4, 4>();
-    benchmark<cond::queue, 4, 4>();
-    benchmark<mpmc::queue, 4, 4>();
-    benchmark<mpmc::qring, 4, 4>();
+    benchmark_batch<16, 16, lock::queue,
+                            cond::queue,
+                            mpmc::queue,
+                            mpmc::qring>();
 
-    std::cout << std::endl;
-
-    benchmark<lock::queue, 8, 8>();
-    benchmark<cond::queue, 8, 8>();
-    benchmark<mpmc::queue, 8, 8>();
-    benchmark<mpmc::qring, 8, 8>();
-
-    std::cout << std::endl;
-
-    benchmark<lock::queue, 16, 16>();
-    benchmark<cond::queue, 16, 16>();
-    benchmark<mpmc::queue, 16, 16>();
-    benchmark<mpmc::qring, 16, 16>();
-
-    std::cout << std::endl;
-
-    benchmark<lock::queue, 32, 32>();
-    benchmark<cond::queue, 32, 32>();
-    benchmark<mpmc::queue, 32, 32>();
-    benchmark<mpmc::qring, 32, 32>();
     return 0;
 }
