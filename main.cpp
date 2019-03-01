@@ -48,7 +48,9 @@ void benchmark(int loop = 100000) {
             for (int k = 0; k < 100; ++k) {
                 int beg = i * cnt;
                 for (int n = beg; n < (beg + cnt); ++n) {
-                    que.push(n);
+                    while (!que.push(n)) {
+                        std::this_thread::yield();
+                    }
                 }
             }
             que.push(-1);
@@ -95,6 +97,7 @@ int main() {
     benchmark<cond::queue, 1, 1>();
     benchmark<mpmc::queue, 1, 1>();
     benchmark<spsc::queue, 1, 1>();
+    benchmark<spsc::ring , 1, 1>();
 
     std::cout << std::endl;
 

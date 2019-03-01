@@ -3,6 +3,8 @@
 #include <atomic>
 #include <new>
 #include <utility>
+#include <limits>
+#include <cstdint>
 
 namespace spsc {
 
@@ -87,17 +89,19 @@ public:
              ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
-//    void push(T const & val) {
-//        auto n = allocator_.alloc(val, nullptr);
-//        tail_.exchange(n, std::memory_order_relaxed)
-//         ->next_.store(n, std::memory_order_release);
+//    bool push(T const & val) {
+//        auto p = allocator_.alloc(val, nullptr);
+//        tail_.exchange(p, std::memory_order_relaxed)
+//         ->next_.store(p, std::memory_order_release);
+//        return true;
 //    }
 
-    void push(T const & val) {
+    bool push(T const & val) {
         auto p = allocator_.alloc(val, nullptr);
         auto t = tail_.load(std::memory_order_relaxed);
         t->next_.store(p, std::memory_order_relaxed);
         tail_.store(p, std::memory_order_release);
+        return true;
     }
 
     std::tuple<T, bool> pop() {
@@ -111,6 +115,52 @@ public:
             allocator_.free(curr);
         }
         return std::make_tuple(next->data_, true);
+    }
+};
+
+template <typename T>
+class ring {
+public:
+    enum : std::size_t {
+        elem_max = (std::numeric_limits<std::uint8_t>::max)() + 1, // default is 255 + 1
+    };
+
+private:
+    T block_[elem_max];
+
+    std::atomic<std::uint16_t> rd_ { 0 }; // read index
+    std::atomic<std::uint16_t> wt_ { 0 }; // write index
+
+    constexpr static std::uint8_t index_of(std::uint16_t index) noexcept {
+        return static_cast<std::uint8_t>(index);
+    }
+
+public:
+    void quit() {}
+
+    bool empty() const {
+        return index_of(rd_.load(std::memory_order_relaxed)) ==
+               index_of(wt_.load(std::memory_order_acquire));
+    }
+
+    bool push(T const & val) {
+        auto id_wt = index_of(wt_.load(std::memory_order_relaxed));
+        if (id_wt == index_of(rd_.load(std::memory_order_acquire) - 1)) {
+            return false; // full
+        }
+        block_[id_wt] = val;
+        wt_.fetch_add(1, std::memory_order_release);
+        return true;
+    }
+
+    std::tuple<T, bool> pop() {
+        auto id_rd = index_of(rd_.load(std::memory_order_relaxed));
+        if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
+            return {}; // empty
+        }
+        auto ret = block_[id_rd];
+        rd_.fetch_add(1, std::memory_order_release);
+        return std::make_tuple(ret, true);
     }
 };
 

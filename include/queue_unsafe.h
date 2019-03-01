@@ -61,7 +61,7 @@ public:
         return head_ == nullptr;
     }
 
-    void push(T const & val) {
+    bool push(T const & val) {
         auto p = allocator_.alloc(val, nullptr);
         if (tail_ == nullptr) {
             head_ = tail_ = p;
@@ -70,6 +70,7 @@ public:
             tail_->next_ = p;
             tail_ = p;
         }
+        return true;
     }
 
     std::tuple<T, bool> pop() {
@@ -119,12 +120,14 @@ public:
         return base_t::empty();
     }
 
-    void push(T const & val) {
+    bool push(T const & val) {
+        bool ret;
         {
             auto guard = std::unique_lock { lock_ };
-            base_t::push(val);
+            ret = base_t::push(val);
         }
         cond_.notify_one();
+        return ret;
     }
 
     std::tuple<T, bool> pop() {

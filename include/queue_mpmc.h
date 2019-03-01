@@ -1,11 +1,3 @@
-/*
- * https://coolshell.cn/articles/8239.html
- * http://www.voidcn.com/article/p-sijuqlbv-zs.html
- * http://blog.jobbole.com/107955/
- * http://www.cs.rochester.edu/~scott/papers/1996_PODC_queues.pdf
- * http://www.jos.org.cn/ch/reader/create_pdf.aspx?file_no=5021&journal_id=jos
-*/
-
 #pragma once
 
 #include <atomic>
@@ -225,7 +217,7 @@ public:
              ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
-    void push(T const & val) {
+    bool push(T const & val) {
         auto p = allocator_.alloc(nullptr, val);
         auto tail = tail_.tag_load(std::memory_order_relaxed);
         while (1) {
@@ -243,6 +235,7 @@ public:
             }
             tail = tail_.tag_load(std::memory_order_relaxed);
         }
+        return true;
     }
 
     std::tuple<T, bool> pop() {

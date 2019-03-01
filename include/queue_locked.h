@@ -70,7 +70,7 @@ public:
         return head_ == nullptr;
     }
 
-    void push(T const & val) {
+    bool push(T const & val) {
         auto p = allocator_.alloc(val, nullptr);
         auto guard = std::unique_lock { mtx_ };
         if (tail_ == nullptr) {
@@ -80,6 +80,7 @@ public:
             tail_->next_ = p;
             tail_ = p;
         }
+        return true;
     }
 
     std::tuple<T, bool> pop() {
