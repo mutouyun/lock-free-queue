@@ -121,11 +121,11 @@ public:
 template <typename T>
 class qring {
 public:
-    using ei_t = std::uint16_t;
-    using ti_t = std::uint32_t;
+    using ei_t = std::uint8_t;
+    using ti_t = std::uint16_t;
 
     enum : std::size_t {
-        elem_max = (std::numeric_limits<ei_t>::max)() + 1, // 65535 + 1
+        elem_max = (std::numeric_limits<ei_t>::max)() + 1, // 255 + 1
     };
 
 protected:
