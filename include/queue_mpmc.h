@@ -311,11 +311,11 @@ protected:
     using spmc::qring<T>::block_;
     using spmc::qring<T>::index_of;
 
-    std::atomic<std::uint16_t> ct_ { 0 }; // commit index
+    std::atomic<typename spmc::qring<T>::ti_t> ct_ { 0 }; // commit index
 
 public:
     bool push(T const & val) {
-        std::uint16_t cur_ct, nxt_ct;
+        typename spmc::qring<T>::ti_t cur_ct, nxt_ct;
         while (1) {
             cur_ct = ct_.load(std::memory_order_relaxed);
             if (index_of(nxt_ct = cur_ct + 1) ==

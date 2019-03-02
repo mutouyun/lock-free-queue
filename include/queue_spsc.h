@@ -121,18 +121,21 @@ public:
 template <typename T>
 class qring {
 public:
+    using ei_t = std::uint16_t;
+    using ti_t = std::uint32_t;
+
     enum : std::size_t {
-        elem_max = (std::numeric_limits<std::uint8_t>::max)() + 1, // default is 255 + 1
+        elem_max = (std::numeric_limits<ei_t>::max)() + 1, // 65535 + 1
     };
 
 protected:
     T block_[elem_max];
 
-    std::atomic<std::uint16_t> rd_ { 0 }; // read index
-    std::atomic<std::uint16_t> wt_ { 0 }; // write index
+    std::atomic<ti_t> rd_ { 0 }; // read index
+    std::atomic<ti_t> wt_ { 0 }; // write index
 
-    constexpr static std::uint8_t index_of(std::uint16_t index) noexcept {
-        return static_cast<std::uint8_t>(index);
+    constexpr static ei_t index_of(ti_t index) noexcept {
+        return static_cast<ei_t>(index);
     }
 
 public:

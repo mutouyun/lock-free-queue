@@ -37,11 +37,15 @@ std::string type_name() {
 #endif/*__GNUC__*/
 }
 
+enum {
+    loop_count = 80640
+};
+
 template <int PushN, int PopN, template <typename> class Queue>
-void benchmark(int loop = 100000) {
+void benchmark() {
     Queue<int> que;
     capo::stopwatch<> sw { true };
-    int cnt = (loop / PushN);
+    int cnt = (loop_count / PushN);
 
     std::thread push_trds[PushN];
     for (int i = 0; i < PushN; ++i) {
@@ -79,14 +83,14 @@ void benchmark(int loop = 100000) {
         }};
     }
 
-//    std::uint64_t ret = 0;
+    std::uint64_t ret = 0;
     for (int i = 0; i < PopN; ++i) {
         pop_trds[i].join();
-//        ret += sum[i];
+        ret += sum[i];
     }
-//    if ((calc(loop) * 100) != ret) {
-//        std::cout << "fail... " << ret << std::endl;
-//    }
+    if ((calc(loop_count) * 100) != ret) {
+        std::cout << "fail... " << ret << std::endl;
+    }
 
     auto t = sw.elapsed<std::chrono::milliseconds>();
     std::cout << type_name<decltype(que)>() << " "
@@ -97,21 +101,21 @@ template <int PushN, int PopN,
           template <typename> class Q1,
           template <typename> class Q2,
           template <typename> class... Qs>
-void benchmark(int loop = 100000) {
-    benchmark<PushN, PopN, Q1>(loop);
-    benchmark<PushN, PopN, Q2, Qs...>(loop);
+void benchmark() {
+    benchmark<PushN, PopN, Q1>();
+    benchmark<PushN, PopN, Q2, Qs...>();
 }
 
 template <typename F, std::size_t...I>
 constexpr void static_for(std::index_sequence<I...>, F&& f) {
-    auto expand = { (f(std::integral_constant<size_t, I>{}), 0)... };
+    [[maybe_unused]] auto expand = { (f(std::integral_constant<size_t, I>{}), 0)... };
 }
 
 template <int PushN, int PopN, template <typename> class Queue>
-void benchmark_batch(int loop = 100000) {
-    static_for(std::make_index_sequence<(std::max)(PushN, PopN)>{}, [loop](auto index) {
+void benchmark_batch() {
+    static_for(std::make_index_sequence<(std::max)(PushN, PopN)>{}, [](auto index) {
         benchmark<(PushN <= 1 ? 1 : decltype(index)::value + 1),
-                  (PopN  <= 1 ? 1 : decltype(index)::value + 1), Queue>(loop);
+                  (PopN  <= 1 ? 1 : decltype(index)::value + 1), Queue>();
     });
     std::cout << std::endl;
 }
@@ -120,9 +124,9 @@ template <int PushN, int PopN,
           template <typename> class Q1,
           template <typename> class Q2,
           template <typename> class... Qs>
-void benchmark_batch(int loop = 100000) {
-    benchmark_batch<PushN, PopN, Q1>(loop);
-    benchmark_batch<PushN, PopN, Q2, Qs...>(loop);
+void benchmark_batch() {
+    benchmark_batch<PushN, PopN, Q1>();
+    benchmark_batch<PushN, PopN, Q2, Qs...>();
 }
 
 int main() {
