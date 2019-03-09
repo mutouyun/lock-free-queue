@@ -6,6 +6,7 @@
 #include <tuple>
 #include <cstdint>
 #include <thread>
+#include <limits>
 
 #include "queue_spsc.h"
 
@@ -54,7 +55,7 @@ public:
     {}
 
     tagged(T ptr, std::uint64_t tag)
-        : data_(reinterpret_cast<std::uint64_t>(ptr) | (tag & ~mask))
+        : data_(*reinterpret_cast<std::uint64_t*>(&ptr) | (tag & ~mask))
     {}
 
     tagged& operator=(tagged const &) = default;
@@ -66,7 +67,8 @@ public:
     static std::uint64_t del(std::uint64_t tag) { return tag - incr; }
 
     explicit operator T() const {
-        return reinterpret_cast<T>(data_ & mask);
+        auto ret = data_ & mask;
+        return *reinterpret_cast<T*>(&ret);
     }
 
     std::uint64_t data() const {
@@ -112,7 +114,7 @@ public:
     tagged(tagged const &) = default;
 
     tagged(T ptr)
-        : data_(reinterpret_cast<std::uint64_t>(ptr))
+        : data_(*reinterpret_cast<std::uint64_t*>(&ptr))
     {}
 
     tagged& operator=(tagged const &) = default;
@@ -336,15 +338,25 @@ public:
     }
 };
 
+enum : std::uint32_t {
+    invalid_flag = (std::numeric_limits<std::uint32_t>::max)()
+};
+
 template <typename T>
 struct rnode {
     T data_;
-    std::atomic<bool> f_ct_ { false }; // commit flag
+
+    struct alignas(8) tag_t {
+        std::uint32_t c_;
+        std::uint32_t f_;
+    };
+    std::atomic<tag_t> f_ct_ { tag_t { 0, invalid_flag } }; // commit flag
 };
 
 template <typename T>
 class qring : public qlock<rnode<T>> {
     using base_t = qlock<rnode<T>>;
+    using tag_t  = typename rnode<T>::tag_t;
 
 protected:
     using typename base_t::ti_t;
@@ -367,21 +379,24 @@ public:
                 break;
             }
         }
-        auto id_ct = index_of(cur_ct);
-        auto* item = block_ + id_ct;
+        auto* item = block_ + index_of(cur_ct);
         item->data_ = val;
-        item->f_ct_.store(true, std::memory_order_seq_cst);
+        auto cac_ct = item->f_ct_.load(std::memory_order_relaxed);
+        item->f_ct_.store(tag_t { cac_ct.c_ + 1, cur_ct }, std::memory_order_release);
+        std::atomic_thread_fence(std::memory_order_acq_rel);
         while (1) {
-            if (id_ct != index_of(wt_.load(std::memory_order_acquire))) {
+            cac_ct = item->f_ct_.load(std::memory_order_relaxed);
+            if (cur_ct != wt_.load(std::memory_order_acquire)) {
                 return true;
             }
-            if (!item->f_ct_.exchange(false, std::memory_order_relaxed)) {
+            if (cac_ct.f_ != cur_ct ||
+                !item->f_ct_.compare_exchange_strong(cac_ct, tag_t { cac_ct.c_ + 1, invalid_flag }, std::memory_order_relaxed)) {
                 return true;
             }
             wt_.store(nxt_ct, std::memory_order_release);
             cur_ct = nxt_ct;
             nxt_ct = cur_ct + 1;
-            item = block_ + (id_ct = index_of(cur_ct));
+            item = block_ + index_of(cur_ct);
         }
     }
 
