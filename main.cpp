@@ -53,7 +53,7 @@ void benchmark() {
         (push_trds[i] = std::thread {[i, cnt, &que] {
             for (int k = 0; k < rept_count; ++k) {
                 int beg = i * cnt;
-                for (int n = beg, x = 0; n < (beg + cnt); ++n, ++x) {
+                for (int n = beg; n < (beg + cnt); ++n) {
                     while (!que.push(n)) {
                         std::this_thread::yield();
                     }

@@ -51,7 +51,7 @@ public:
     {}
 
     tagged(T ptr)
-        : data_(reinterpret_cast<std::uint64_t>(ptr))
+        : data_(*reinterpret_cast<std::uint64_t*>(&ptr))
     {}
 
     tagged(T ptr, std::uint64_t tag)
@@ -347,10 +347,10 @@ struct rnode {
     T data_;
 
     struct alignas(8) tag_t {
-        std::uint32_t c_;
-        std::uint32_t f_;
+        std::uint32_t val_;
+        std::uint32_t acc_;
     };
-    std::atomic<tag_t> f_ct_ { tag_t { 0, invalid_flag } }; // commit flag
+    std::atomic<tag_t> f_ct_ { tag_t { invalid_flag, 0 } }; // commit flag
 };
 
 template <typename T>
@@ -382,15 +382,17 @@ public:
         auto* item = block_ + index_of(cur_ct);
         item->data_ = val;
         auto cac_ct = item->f_ct_.load(std::memory_order_relaxed);
-        item->f_ct_.store(tag_t { cac_ct.c_ + 1, cur_ct }, std::memory_order_release);
-        std::atomic_thread_fence(std::memory_order_acq_rel);
+        item->f_ct_.store(tag_t { cur_ct, cac_ct.acc_ + 1 }, std::memory_order_release);
         while (1) {
-            cac_ct = item->f_ct_.load(std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            cac_ct = item->f_ct_.load(std::memory_order_acquire);
             if (cur_ct != wt_.load(std::memory_order_acquire)) {
                 return true;
             }
-            if (cac_ct.f_ != cur_ct ||
-                !item->f_ct_.compare_exchange_strong(cac_ct, tag_t { cac_ct.c_ + 1, invalid_flag }, std::memory_order_relaxed)) {
+            if (cac_ct.val_ != cur_ct) {
+                return true;
+            }
+            if (!item->f_ct_.compare_exchange_strong(cac_ct, tag_t{ invalid_flag, cac_ct.acc_ + 1 }, std::memory_order_acq_rel)) {
                 return true;
             }
             wt_.store(nxt_ct, std::memory_order_release);
