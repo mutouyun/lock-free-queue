@@ -242,7 +242,6 @@ public:
     }
 
     std::tuple<T, bool> pop() {
-        T ret;
         auto head = head_.tag_load(std::memory_order_acquire);
         auto tail = tail_.tag_load(std::memory_order_acquire);
         while (1) {
@@ -255,10 +254,10 @@ public:
                     tail_.compare_exchange_weak(tail, next, std::memory_order_relaxed);
                 }
                 else {
-                    ret = next->data_;
+                    auto ret  = std::make_tuple(next->data_, true);
                     if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
                         allocator_.free(head.ptr());
-                        break;
+                        return ret;
                     }
                     tail = tail_.tag_load(std::memory_order_acquire);
                     continue;
@@ -267,7 +266,6 @@ public:
             head = head_.tag_load(std::memory_order_acquire);
             tail = tail_.tag_load(std::memory_order_acquire);
         }
-        return std::make_tuple(ret, true);
     }
 };
 
@@ -285,15 +283,15 @@ protected:
 
 public:
     std::tuple<T, bool> pop() {
+        auto cur_rd = rd_.load(std::memory_order_relaxed);
         while (1) {
-            auto cur_rd = rd_.load(std::memory_order_relaxed);
             auto id_rd = index_of(cur_rd);
             if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
                 return {}; // empty
             }
-            auto ret = block_[id_rd];
+            auto ret = std::make_tuple(block_[id_rd], true);
             if (rd_.compare_exchange_weak(cur_rd, cur_rd + 1, std::memory_order_release)) {
-                return std::make_tuple(ret, true);
+                return ret;
             }
         }
     }
@@ -304,20 +302,21 @@ public:
 namespace mpmc {
 
 template <typename T>
-class qring : public spmc::qring<T> {
-protected:
-    using spmc::qring<T>::rd_;
-    using spmc::qring<T>::wt_;
-    using spmc::qring<T>::block_;
-    using spmc::qring<T>::index_of;
+class qlock : public spmc::qring<T> {
+    using base_t = spmc::qring<T>;
 
-    std::atomic<typename spmc::qring<T>::ti_t> ct_ { 0 }; // commit index
+protected:
+    using base_t::rd_;
+    using base_t::wt_;
+    using base_t::block_;
+    using base_t::index_of;
+
+    std::atomic<typename base_t::ti_t> ct_ { 0 }; // commit index
 
 public:
     bool push(T const & val) {
-        typename spmc::qring<T>::ti_t cur_ct, nxt_ct;
+        typename base_t::ti_t cur_ct = ct_.load(std::memory_order_relaxed), nxt_ct;
         while (1) {
-            cur_ct = ct_.load(std::memory_order_relaxed);
             if (index_of(nxt_ct = cur_ct + 1) ==
                 index_of(rd_.load(std::memory_order_acquire))) {
                 return false; // full
@@ -330,12 +329,119 @@ public:
         while (1) {
             auto exp_wt = cur_ct;
             if (wt_.compare_exchange_weak(exp_wt, nxt_ct, std::memory_order_release)) {
-                break;
+                return true;
             }
             std::this_thread::yield();
         }
-        return true;
     }
 };
 
+template <typename T>
+struct rnode {
+    T data_;
+    std::atomic<bool> f_ct_ { false }; // commit flag
+};
+
+template <typename T>
+class qring : public qlock<rnode<T>> {
+    using base_t = qlock<rnode<T>>;
+
+protected:
+    using typename base_t::ti_t;
+
+    using base_t::rd_;
+    using base_t::wt_;
+    using base_t::ct_;
+    using base_t::block_;
+    using base_t::index_of;
+
+public:
+    bool push(T const & val) {
+        ti_t cur_ct = ct_.load(std::memory_order_relaxed), nxt_ct;
+        while (1) {
+            if (index_of(nxt_ct = cur_ct + 1) ==
+                index_of(rd_.load(std::memory_order_acquire))) {
+                return false; // full
+            }
+            if (ct_.compare_exchange_weak(cur_ct, nxt_ct, std::memory_order_release)) {
+                break;
+            }
+        }
+        auto id_ct = index_of(cur_ct);
+        auto* item = block_ + id_ct;
+        item->data_ = val;
+        item->f_ct_.store(true, std::memory_order_seq_cst);
+        while (1) {
+            if (id_ct != index_of(wt_.load(std::memory_order_acquire))) {
+                return true;
+            }
+            if (!item->f_ct_.exchange(false, std::memory_order_relaxed)) {
+                return true;
+            }
+            wt_.store(nxt_ct, std::memory_order_release);
+            cur_ct = nxt_ct;
+            nxt_ct = cur_ct + 1;
+            item = block_ + (id_ct = index_of(cur_ct));
+        }
+    }
+
+    std::tuple<T, bool> pop() {
+        auto cur_rd = rd_.load(std::memory_order_relaxed);
+        while (1) {
+            auto id_rd = index_of(cur_rd);
+            if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
+                return {}; // empty
+            }
+            auto ret = std::make_tuple(block_[id_rd].data_, true);
+            if (rd_.compare_exchange_weak(cur_rd, cur_rd + 1, std::memory_order_release)) {
+                return ret;
+            }
+        }
+    }
+};
+
+/*
+template <typename T>
+class qring : public spsc::qring<rnode<T>> {
+    using base_t = spsc::qring<rnode<T>>;
+
+protected:
+    using base_t::rd_;
+    using base_t::wt_;
+    using base_t::block_;
+    using base_t::index_of;
+
+    std::atomic<bool> quit_ { false };
+
+public:
+    void quit() {
+        quit_.store(true, std::memory_order_relaxed);
+    }
+
+    bool push(T const & val) {
+        auto id_wt = index_of(wt_.fetch_add(1, std::memory_order_relaxed));
+        auto& item = block_[id_wt];
+        while (item.f_ct_.load(std::memory_order_acquire)) {
+            std::this_thread::yield(); // full
+        }
+        item.data_ = val;
+        item.f_ct_.store(true, std::memory_order_release);
+        return true;
+    }
+
+    std::tuple<T, bool> pop() {
+        auto id_rd = index_of(rd_.fetch_add(1, std::memory_order_relaxed));
+        auto& item = block_[id_rd];
+        while (!item.f_ct_.load(std::memory_order_acquire)) {
+            if (quit_.load(std::memory_order_relaxed)) {
+                return {};
+            }
+            std::this_thread::yield(); // empty
+        }
+        auto ret = std::make_tuple(item.data_, true);
+        item.f_ct_.store(false, std::memory_order_release);
+        return ret;
+    }
+};
+*/
 } // namespace mpmc

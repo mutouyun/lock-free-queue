@@ -38,7 +38,8 @@ std::string type_name() {
 }
 
 enum {
-    loop_count = 80640
+    loop_count = 80640,
+    rept_count = 100
 };
 
 template <int PushN, int PopN, template <typename> class Queue>
@@ -50,15 +51,18 @@ void benchmark() {
     std::thread push_trds[PushN];
     for (int i = 0; i < PushN; ++i) {
         (push_trds[i] = std::thread {[i, cnt, &que] {
-            for (int k = 0; k < 100; ++k) {
+            for (int k = 0; k < rept_count; ++k) {
                 int beg = i * cnt;
-                for (int n = beg; n < (beg + cnt); ++n) {
+                for (int n = beg, x = 0; n < (beg + cnt); ++n, ++x) {
                     while (!que.push(n)) {
                         std::this_thread::yield();
                     }
                 }
             }
-            que.push(-1);
+            //std::cout << "end push: " << i << std::endl;
+            while (!que.push(-1)) {
+                std::this_thread::yield();
+            }
         }}).detach();
     }
 
@@ -71,7 +75,9 @@ void benchmark() {
             while (push_end.load(std::memory_order_acquire) < PushN) {
                 while (std::get<1>(tp = que.pop())) {
                     if (std::get<0>(tp) < 0) {
-                        if ((push_end.fetch_add(1, std::memory_order_release) + 1) >= PushN) {
+                        int pop_count = push_end.fetch_add(1, std::memory_order_release) + 1;
+                        //std::cout << "pop count: " << pop_count << std::endl;
+                        if (pop_count >= PushN) {
                             que.quit();
                             return;
                         }
@@ -88,7 +94,7 @@ void benchmark() {
         pop_trds[i].join();
         ret += sum[i];
     }
-    if ((calc(loop_count) * 100) != ret) {
+    if ((calc(loop_count) * rept_count) != ret) {
         std::cout << "fail... " << ret << std::endl;
     }
 
@@ -130,30 +136,38 @@ void benchmark_batch() {
 }
 
 int main() {
-    benchmark<1, 1, lock::queue,
-                    cond::queue,
-                    mpmc::queue,
-                    mpmc::qring,
-                    spmc::qring,
-                    spsc::queue,
-                    spsc::qring>();
+    //for (int i = 0; i < 100; ++i) {
+    //    std::cout << i << std::endl;
 
-    std::cout << std::endl;
+        benchmark<1, 1, lock::queue,
+                        cond::queue,
+                        mpmc::queue,
+                        mpmc::qlock,
+                        mpmc::qring,
+                        spmc::qring,
+                        spsc::queue,
+                        spsc::qring>();
 
-    benchmark_batch<1, 8, lock::queue,
-                          cond::queue,
-                          mpmc::queue,
-                          mpmc::qring,
-                          spmc::qring>();
+        std::cout << std::endl;
 
-    benchmark_batch<8, 1, lock::queue,
-                          cond::queue,
-                          mpmc::queue,
-                          mpmc::qring>();
+        benchmark_batch<1, 8, lock::queue,
+                              cond::queue,
+                              mpmc::queue,
+                              mpmc::qlock,
+                              mpmc::qring,
+                              spmc::qring>();
 
-    benchmark_batch<8, 8, lock::queue,
-                          cond::queue,
-                          mpmc::queue,
-                          mpmc::qring>();
+        benchmark_batch<8, 1, lock::queue,
+                              cond::queue,
+                              mpmc::queue,
+                              mpmc::qlock,
+                              mpmc::qring>();
+
+        benchmark_batch<8, 8, lock::queue,
+                              cond::queue,
+                              mpmc::queue,
+                              mpmc::qlock,
+                              mpmc::qring>();
+    //}
     return 0;
 }

@@ -77,14 +77,14 @@ public:
         if (head_ == nullptr) {
             return {};
         }
-        T val = head_->data_;
+        auto ret  = std::make_tuple(head_->data_, true);
         auto temp = head_;
         head_ = head_->next_;
         if (tail_ == temp) {
             tail_ = nullptr;
         }
         allocator_.free(temp);
-        return std::make_tuple(val, true);
+        return ret;
     }
 };
 

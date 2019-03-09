@@ -161,9 +161,9 @@ public:
         if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
             return {}; // empty
         }
-        auto ret = block_[id_rd];
+        auto ret = std::make_tuple(block_[id_rd], true);
         rd_.fetch_add(1, std::memory_order_release);
-        return std::make_tuple(ret, true);
+        return ret;
     }
 };
 

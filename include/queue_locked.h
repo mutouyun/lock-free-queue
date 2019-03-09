@@ -89,7 +89,7 @@ public:
         if (head_ == nullptr) {
             return {};
         }
-        T val = head_->data_;
+        auto ret  = std::make_tuple(head_->data_, true);
         temp = decltype(temp) {
             head_, [this](node* temp) { allocator_.free(temp); }
         };
@@ -97,7 +97,7 @@ public:
         if (tail_ == temp.get()) {
             tail_ = nullptr;
         }
-        return std::make_tuple(val, true);
+        return ret;
     }
 };
 
