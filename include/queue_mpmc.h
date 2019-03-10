@@ -367,6 +367,8 @@ protected:
     using base_t::block_;
     using base_t::index_of;
 
+    std::atomic<unsigned> barrier_;
+
 public:
     bool push(T const & val) {
         ti_t cur_ct = ct_.load(std::memory_order_relaxed), nxt_ct;
@@ -384,7 +386,7 @@ public:
         auto cac_ct = item->f_ct_.load(std::memory_order_relaxed);
         item->f_ct_.store(tag_t { cur_ct, cac_ct.acc_ + 1 }, std::memory_order_release);
         while (1) {
-            std::atomic_thread_fence(std::memory_order_seq_cst);
+            barrier_.exchange(0, std::memory_order_acq_rel);
             cac_ct = item->f_ct_.load(std::memory_order_acquire);
             if (cur_ct != wt_.load(std::memory_order_acquire)) {
                 return true;
