@@ -177,7 +177,7 @@ public:
                 }
                 auto next = curr->next_.load(std::memory_order_relaxed);
                 if (cursor_.compare_exchange_weak(curr, next, std::memory_order_acquire)) {
-                    return ::new (&(curr->data_)) T { std::forward<P>(pars)... };
+                    break;
                 }
             }
         }

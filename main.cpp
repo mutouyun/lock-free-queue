@@ -142,10 +142,10 @@ int main() {
         benchmark<1, 1, lock::queue,
                         cond::queue,
                         mpmc::queue,
+                        spsc::queue,
                         mpmc::qlock,
                         mpmc::qring,
                         spmc::qring,
-                        spsc::queue,
                         spsc::qring>();
 
         std::cout << std::endl;
