@@ -51,11 +51,11 @@ public:
     {}
 
     tagged(T ptr)
-        : data_(*reinterpret_cast<std::uint64_t*>(&ptr))
+        : data_(reinterpret_cast<std::uint64_t>(ptr))
     {}
 
     tagged(T ptr, std::uint64_t tag)
-        : data_(*reinterpret_cast<std::uint64_t*>(&ptr) | (tag & ~mask))
+        : data_(reinterpret_cast<std::uint64_t>(ptr) | (tag & ~mask))
     {}
 
     tagged& operator=(tagged const &) = default;
@@ -114,7 +114,7 @@ public:
     tagged(tagged const &) = default;
 
     tagged(T ptr)
-        : data_(*reinterpret_cast<std::uint64_t*>(&ptr))
+        : data_(reinterpret_cast<std::uint64_t>(ptr))
     {}
 
     tagged& operator=(tagged const &) = default;
@@ -127,9 +127,14 @@ public:
         return dt_t { data_.load(order) };
     }
 
+    auto exchange(T val, std::memory_order order) {
+        auto old = this->tag_load(std::memory_order_relaxed);
+        while (!this->compare_exchange_weak(old, val, order)) ;
+        return old;
+    }
+
     void store(T val, std::memory_order order) {
-        auto exp = this->tag_load(std::memory_order_relaxed);
-        while (!this->compare_exchange_weak(exp, val, order)) ;
+        this->exchange(val, order);
     }
 
     bool compare_exchange_weak(dt_t& exp, T val, std::memory_order order) {
@@ -205,8 +210,8 @@ template <typename T>
 class queue {
 
     struct node {
-        tagged<node*> next_;
         T data_;
+        tagged<node*> next_;
     };
 
     pool<node> allocator_;
@@ -222,8 +227,95 @@ public:
              ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
+    bool push_v1(T const & val) {
+        auto p = allocator_.alloc(val, nullptr);
+        while (1) {
+            auto tail = tail_.tag_load(std::memory_order_relaxed);
+            auto next = tail->next_.tag_load(std::memory_order_acquire);
+            if (next.ptr() == nullptr &&
+                tail->next_.compare_exchange_weak(next, p, std::memory_order_relaxed)) {
+                tail_.compare_exchange_strong(tail, p, std::memory_order_release);
+                return true;
+            }
+        }
+    }
+
+    bool push_v2(T const & val) {
+        auto p = allocator_.alloc(val, nullptr);
+        auto tail = tail_.tag_load(std::memory_order_relaxed);
+        while (1) {
+            auto next = tail->next_.tag_load(std::memory_order_acquire);
+            if (next.ptr() == nullptr) {
+                if (tail->next_.compare_exchange_weak(next, p, std::memory_order_relaxed)) {
+                    tail_.compare_exchange_strong(tail, p, std::memory_order_release);
+                    return true;
+                }
+            }
+            else if (!tail_.compare_exchange_weak(tail, next.ptr(), std::memory_order_relaxed)) {
+                continue;
+            }
+            tail = tail_.tag_load(std::memory_order_relaxed);
+        }
+    }
+
+    bool push_v3(T const & val) {
+        auto p = allocator_.alloc(val, nullptr);
+        tail_.exchange(p, std::memory_order_relaxed)
+         ->next_.store(p, std::memory_order_release);
+        return true;
+    }
+
+    std::tuple<T, bool> pop_v1() {
+        auto head = head_.tag_load(std::memory_order_acquire);
+        while (1) {
+            auto next = head->next_.load(std::memory_order_acquire);
+            if (next == nullptr) {
+                return {};
+            }
+            auto ret = std::make_tuple(next->data_, true);
+            if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
+                allocator_.free(head.ptr());
+                return ret;
+            }
+        }
+    }
+
+    std::tuple<T, bool> pop_v2() {
+        auto head = head_.tag_load(std::memory_order_relaxed);
+        auto tail = tail_.tag_load(std::memory_order_relaxed);
+        while (1) {
+            auto next = head->next_.load(std::memory_order_acquire);
+            if (next == nullptr) {
+                return {};
+            }
+            if (head.ptr() == tail.ptr()) {
+                if (!tail_.compare_exchange_weak(tail, next, std::memory_order_relaxed)) {
+                    head = head_.tag_load(std::memory_order_relaxed);
+                    continue;
+                }
+            }
+            else {
+                auto ret = std::make_tuple(next->data_, true);
+                if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
+                    allocator_.free(head.ptr());
+                    return ret;
+                }
+                tail = tail_.tag_load(std::memory_order_acquire);
+                continue;
+            }
+            head = head_.tag_load(std::memory_order_relaxed);
+            tail = tail_.tag_load(std::memory_order_relaxed);
+        }
+    }
+
+    /*
+     * Simple, Fast, and Practical Non-Blocking and Blocking Concurrent Queue Algorithms
+     *  - Maged M. Michael, Michael L. Scott
+     * http://www.cs.rochester.edu/~scott/papers/1996_PODC_queues.pdf
+    */
+
     bool push(T const & val) {
-        auto p = allocator_.alloc(nullptr, val);
+        auto p = allocator_.alloc(val, nullptr);
         auto tail = tail_.tag_load(std::memory_order_relaxed);
         while (1) {
             auto next = tail->next_.tag_load(std::memory_order_acquire);
@@ -256,7 +348,7 @@ public:
                     tail_.compare_exchange_weak(tail, next, std::memory_order_relaxed);
                 }
                 else {
-                    auto ret  = std::make_tuple(next->data_, true);
+                    auto ret = std::make_tuple(next->data_, true);
                     if (head_.compare_exchange_weak(head, next, std::memory_order_acquire)) {
                         allocator_.free(head.ptr());
                         return ret;
@@ -284,6 +376,11 @@ protected:
     using spsc::qring<T>::index_of;
 
 public:
+    /*
+     * Yet another implementation of a lock-free circular array queue
+     *  - Faustino Frechilla
+     * https://www.codeproject.com/Articles/153898/Yet-another-implementation-of-a-lock-free-circular
+    */
     std::tuple<T, bool> pop() {
         auto cur_rd = rd_.load(std::memory_order_relaxed);
         while (1) {
@@ -308,27 +405,38 @@ class qlock : public spmc::qring<T> {
     using base_t = spmc::qring<T>;
 
 protected:
+    using typename base_t::ti_t;
+
     using base_t::rd_;
     using base_t::wt_;
     using base_t::block_;
     using base_t::index_of;
 
-    std::atomic<typename base_t::ti_t> ct_ { 0 }; // commit index
+    std::atomic<ti_t> ct_ { 0 }; // commit index
 
 public:
+    /*
+     * Yet another implementation of a lock-free circular array queue
+     *  - Faustino Frechilla
+     * https://www.codeproject.com/Articles/153898/Yet-another-implementation-of-a-lock-free-circular
+    */
     bool push(T const & val) {
-        typename base_t::ti_t cur_ct = ct_.load(std::memory_order_relaxed), nxt_ct;
+        ti_t cur_ct = ct_.load(std::memory_order_acquire), nxt_ct;
         while (1) {
             if (index_of(nxt_ct = cur_ct + 1) ==
                 index_of(rd_.load(std::memory_order_acquire))) {
                 return false; // full
             }
-            if (ct_.compare_exchange_weak(cur_ct, nxt_ct, std::memory_order_release)) {
+            if (ct_.compare_exchange_weak(cur_ct, nxt_ct, std::memory_order_acq_rel)) {
                 break;
             }
         }
         block_[index_of(cur_ct)] = val;
         while (1) {
+//            if (cur_ct == wt_.load(std::memory_order_relaxed)) {
+//                wt_.store(nxt_ct, std::memory_order_release);
+//                return true;
+//            }
             auto exp_wt = cur_ct;
             if (wt_.compare_exchange_weak(exp_wt, nxt_ct, std::memory_order_release)) {
                 return true;
@@ -361,17 +469,15 @@ protected:
     using base_t::block_;
     using base_t::index_of;
 
-    std::atomic<unsigned> barrier_;
-
 public:
     bool push(T const & val) {
-        ti_t cur_ct = ct_.load(std::memory_order_relaxed), nxt_ct;
+        ti_t cur_ct = ct_.load(std::memory_order_acquire), nxt_ct;
         while (1) {
             if (index_of(nxt_ct = cur_ct + 1) ==
                 index_of(rd_.load(std::memory_order_acquire))) {
                 return false; // full
             }
-            if (ct_.compare_exchange_weak(cur_ct, nxt_ct, std::memory_order_release)) {
+            if (ct_.compare_exchange_weak(cur_ct, nxt_ct, std::memory_order_acq_rel)) {
                 break;
             }
         }
@@ -379,7 +485,6 @@ public:
         item->data_ = val;
         item->f_ct_.store(cur_ct, std::memory_order_release);
         while (1) {
-            barrier_.exchange(0, std::memory_order_acq_rel);
             auto cac_ct = item->f_ct_.load(std::memory_order_acquire);
             if (cur_ct != wt_.load(std::memory_order_acquire)) {
                 return true;
@@ -400,21 +505,31 @@ public:
     std::tuple<T, bool> pop() {
         auto cur_rd = rd_.load(std::memory_order_relaxed);
         while (1) {
-            auto id_rd = index_of(cur_rd);
-            if (id_rd == index_of(wt_.load(std::memory_order_acquire))) {
-                return {}; // empty
+            auto id_rd  = index_of(cur_rd);
+            auto cur_wt = wt_.load(std::memory_order_acquire);
+            if (id_rd == index_of(cur_wt)) {
+                auto* item = block_ + index_of(cur_wt);
+                auto cac_ct = item->f_ct_.load(std::memory_order_acquire);
+                if (cac_ct != cur_wt) {
+                    return {}; // empty
+                }
+                if (item->f_ct_.compare_exchange_weak(cac_ct, invalid_index, std::memory_order_relaxed)) {
+                    wt_.store(cur_wt + 1, std::memory_order_release);
+                }
+                cur_rd = rd_.load(std::memory_order_relaxed);
             }
-            auto ret = std::make_tuple(block_[id_rd].data_, true);
-            if (rd_.compare_exchange_weak(cur_rd, cur_rd + 1, std::memory_order_release)) {
-                return ret;
+            else {
+                auto ret = std::make_tuple(block_[id_rd].data_, true);
+                if (rd_.compare_exchange_weak(cur_rd, cur_rd + 1, std::memory_order_release)) {
+                    return ret;
+                }
             }
         }
     }
 };
 
-/*
 template <typename T>
-class qring : public spsc::qring<rnode<T>> {
+class qring2 : public spsc::qring<rnode<T>> {
     using base_t = spsc::qring<rnode<T>>;
 
 protected:
@@ -430,30 +545,40 @@ public:
         quit_.store(true, std::memory_order_relaxed);
     }
 
+    /*
+     * A bounded wait-free(almost) zero-copy MPMC queue written in C++11, which can also reside in SHM for IPC
+     *  - MengRao/WFMPMC
+     * https://github.com/MengRao/WFMPMC
+    */
+
     bool push(T const & val) {
-        auto id_wt = index_of(wt_.fetch_add(1, std::memory_order_relaxed));
-        auto& item = block_[id_wt];
-        while (item.f_ct_.load(std::memory_order_acquire)) {
+        auto cur_wt = wt_.fetch_add(1, std::memory_order_relaxed);
+        auto& item = block_[index_of(cur_wt)];
+        while (1) {
+            auto cac_id = item.f_ct_.load(std::memory_order_acquire);
+            if (cac_id == cur_wt || cac_id == invalid_index) {
+                break;
+            }
             std::this_thread::yield(); // full
         }
         item.data_ = val;
-        item.f_ct_.store(true, std::memory_order_release);
+        item.f_ct_.store(static_cast<decltype(cur_wt)>(~cur_wt), std::memory_order_release);
         return true;
     }
 
     std::tuple<T, bool> pop() {
-        auto id_rd = index_of(rd_.fetch_add(1, std::memory_order_relaxed));
-        auto& item = block_[id_rd];
-        while (!item.f_ct_.load(std::memory_order_acquire)) {
+        auto cur_rd = rd_.fetch_add(1, std::memory_order_relaxed);
+        auto& item = block_[index_of(cur_rd)];
+        while (item.f_ct_.load(std::memory_order_acquire) != static_cast<decltype(cur_rd)>(~cur_rd)) {
             if (quit_.load(std::memory_order_relaxed)) {
                 return {};
             }
             std::this_thread::yield(); // empty
         }
         auto ret = std::make_tuple(item.data_, true);
-        item.f_ct_.store(false, std::memory_order_release);
+        item.f_ct_.store(cur_rd + elem_max, std::memory_order_release);
         return ret;
     }
 };
-*/
+
 } // namespace mpmc

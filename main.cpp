@@ -136,8 +136,8 @@ void benchmark_batch() {
 }
 
 int main() {
-    //for (int i = 0; i < 100; ++i) {
-    //    std::cout << i << std::endl;
+//    for (int i = 0; i < 100; ++i) {
+//        std::cout << i << std::endl;
 
         benchmark<1, 1, lock::queue,
                         cond::queue,
@@ -146,7 +146,8 @@ int main() {
                         mpmc::qlock,
                         mpmc::qring,
                         spmc::qring,
-                        spsc::qring>();
+                        spsc::qring,
+                        mpmc::qring2>();
 
         std::cout << std::endl;
 
@@ -155,19 +156,22 @@ int main() {
                               mpmc::queue,
                               mpmc::qlock,
                               mpmc::qring,
-                              spmc::qring>();
+                              spmc::qring,
+                              mpmc::qring2>();
 
         benchmark_batch<8, 1, lock::queue,
                               cond::queue,
                               mpmc::queue,
                               mpmc::qlock,
-                              mpmc::qring>();
+                              mpmc::qring,
+                              mpmc::qring2>();
 
         benchmark_batch<8, 8, lock::queue,
                               cond::queue,
                               mpmc::queue,
                               mpmc::qlock,
-                              mpmc::qring>();
-    //}
+                              mpmc::qring,
+                              mpmc::qring2>();
+//    }
     return 0;
 }

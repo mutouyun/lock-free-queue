@@ -89,13 +89,6 @@ public:
              ->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
-//    bool push(T const & val) {
-//        auto p = allocator_.alloc(val, nullptr);
-//        tail_.exchange(p, std::memory_order_relaxed)
-//         ->next_.store(p, std::memory_order_release);
-//        return true;
-//    }
-
     bool push(T const & val) {
         auto p = allocator_.alloc(val, nullptr);
         auto t = tail_.load(std::memory_order_relaxed);
