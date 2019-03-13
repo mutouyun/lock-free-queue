@@ -576,7 +576,7 @@ public:
             std::this_thread::yield(); // empty
         }
         auto ret = std::make_tuple(item.data_, true);
-        item.f_ct_.store(cur_rd + elem_max, std::memory_order_release);
+        item.f_ct_.store(cur_rd + base_t::elem_max, std::memory_order_release);
         return ret;
     }
 };
