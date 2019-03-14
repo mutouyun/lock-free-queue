@@ -38,8 +38,8 @@ std::string type_name() {
 }
 
 enum {
-    loop_count = 80640,
-    rept_count = 100
+    loop_count = 11531520,
+    rept_count = 1
 };
 
 template <int PushN, int PopN, template <typename> class Queue>
@@ -100,7 +100,7 @@ void benchmark() {
 
     auto t = sw.elapsed<std::chrono::milliseconds>();
     std::cout << type_name<decltype(que)>() << " "
-              << PushN << ":" << PopN << " - " << t << "ms\t" << std::endl;
+              << PushN << ":" << PopN << " - " << t << " ms" << std::endl;
 }
 
 template <int PushN, int PopN,
