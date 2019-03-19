@@ -19,16 +19,16 @@ struct tagged_factor;
 template <>
 struct tagged_factor<4> {
     enum : std::uint64_t {
-        mask = 0x00000000fffffffful,
-        incr = 0x0000000100000000ul
+        mask = 0x00000000ffffffffull,
+        incr = 0x0000000100000000ull
     };
 };
 
 template <>
 struct tagged_factor<8> {
     enum : std::uint64_t {
-        mask = 0x0000fffffffffffful,
-        incr = 0x0001000000000000ul
+        mask = 0x0000ffffffffffffull,
+        incr = 0x0001000000000000ull
     };
 };
 
