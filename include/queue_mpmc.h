@@ -152,6 +152,11 @@ class pool {
     union node {
         T data_;
         tagged<node*> next_;
+
+        template <typename... P>
+        node(P&&... pars)
+            : data_ { std::forward<P>(pars)... }
+        {}
     };
 
     tagged     <node*> cursor_ { nullptr };
