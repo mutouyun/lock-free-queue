@@ -1,6 +1,6 @@
 # Lock-Free Queue
 
-[![Build Status](https://travis-ci.org/mutouyun/lock-free.svg?branch=master)](https://travis-ci.org/mutouyun/lock-free) [![Build status](https://ci.appveyor.com/api/projects/status/github/mutouyun/lock-free?branch=master&svg=true)](https://ci.appveyor.com/project/mutouyun/lock-free) [![](https://img.shields.io/badge/speech-bilibili-ff69b4.svg)](https://www.bilibili.com/video/av47644468/?p=1)
+[![Build Status](https://travis-ci.org/mutouyun/lock-free-queue.svg?branch=master)](https://travis-ci.org/mutouyun/lock-free-queue) [![Build status](https://ci.appveyor.com/api/projects/status/github/mutouyun/lock-free-queue?branch=master&svg=true)](https://ci.appveyor.com/project/mutouyun/lock-free) [![](https://img.shields.io/badge/speech-bilibili-ff69b4.svg)](https://www.bilibili.com/video/av47644468/?p=1)
 
 lock-free linked-queue & ring-buffer queue
 * 演讲ppt：[Lock-Free Queue](lock-free.pptx)
