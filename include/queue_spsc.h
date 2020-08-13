@@ -4,6 +4,7 @@
 #include <new>
 #include <utility>
 #include <limits>
+#include <tuple>
 #include <cstdint>
 
 namespace spsc {
@@ -76,8 +77,8 @@ class queue {
         std::atomic<node*> next_;
     } dummy_ { {}, nullptr };
 
-    std::atomic<node*> head_ { &dummy_ };
-    std::atomic<node*> tail_ { &dummy_ };
+    node* head_ { &dummy_ };
+    node* tail_ { &dummy_ };
 
     pool<node> allocator_;
 
@@ -85,25 +86,23 @@ public:
     void quit() {}
 
     bool empty() const {
-        return head_.load(std::memory_order_acquire)
-             ->next_.load(std::memory_order_relaxed) == nullptr;
+        return head_->next_.load(std::memory_order_relaxed) == nullptr;
     }
 
     bool push(T const & val) {
         auto p = allocator_.alloc(val, nullptr);
-        auto t = tail_.load(std::memory_order_relaxed);
-        t->next_.store(p, std::memory_order_relaxed);
-        tail_.store(p, std::memory_order_release);
+        tail_->next_.store(p, std::memory_order_release);
+        tail_ = p;
         return true;
     }
 
     std::tuple<T, bool> pop() {
-        auto curr = head_.load(std::memory_order_acquire);
-        auto next = curr->next_.load(std::memory_order_relaxed);
+        auto curr = head_;
+        auto next = curr->next_.load(std::memory_order_acquire);
         if (next == nullptr) {
             return {};
         }
-        head_.store(next, std::memory_order_relaxed);
+        head_ = next;
         if (curr != &dummy_) {
             allocator_.free(curr);
         }
